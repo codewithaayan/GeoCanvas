@@ -15,6 +15,7 @@ import {
   IconUndo,
   IconRedo
 } from '../assets/math-icons';
+import myLogo from "../assets/My-logo.png";
 
 export default function TopBar({
   onOpenSampleModal
@@ -352,7 +353,7 @@ export default function TopBar({
 
             <div className="about-logo-area">
               <img
-                src="/src/assets/My logo.jsx"
+                src={myLogo}
                 alt="My Logo"
                 className="about-logo"
               />
