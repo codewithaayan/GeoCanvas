@@ -585,13 +585,13 @@ export default function GeometryLayer({
         const labelX =
           circle.center.x +
           Math.cos(angle) *
-            distanceFromCenter +
+          distanceFromCenter +
           15;
 
         const labelY =
           circle.center.y +
           Math.sin(angle) *
-            distanceFromCenter;
+          distanceFromCenter;
 
         drawMeasurementLabel(
           ctx,
@@ -743,7 +743,7 @@ export default function GeometryLayer({
             const cosine =
               clamp(
                 dot /
-                  (lenA * lenC),
+                (lenA * lenC),
                 -1,
                 1
               );
@@ -798,26 +798,26 @@ export default function GeometryLayer({
               const signed =
                 getSignedAngleDifference(
                   (start * 180) /
-                    Math.PI,
+                  Math.PI,
                   (end * 180) /
-                    Math.PI
+                  Math.PI
                 );
 
               const mid =
                 start +
                 ((signed * Math.PI) /
                   180) /
-                  2;
+                2;
 
               drawMeasurementLabel(
                 ctx,
                 `${angle.toFixed(1)}°`,
                 B.x +
-                  Math.cos(mid) *
-                    (arcRadius + 25),
+                Math.cos(mid) *
+                (arcRadius + 25),
                 B.y +
-                  Math.sin(mid) *
-                    (arcRadius + 25)
+                Math.sin(mid) *
+                (arcRadius + 25)
               );
             }
           }
@@ -1043,112 +1043,112 @@ export default function GeometryLayer({
           live.type ===
           "arc"
         ) {
-            const center =
-              live.center;
+          const center =
+            live.center;
 
-            const radius =
-              Number(
-                live.radius
-              ) || 0;
+          const radius =
+            Number(
+              live.radius
+            ) || 0;
 
-            const start =
-              (Number(
-                live.startAngle
-              ) *
-                Math.PI) /
-              180;
+          const start =
+            (Number(
+              live.startAngle
+            ) *
+              Math.PI) /
+            180;
 
-            const end =
+          const end =
+            (Number(
+              live.endAngle
+            ) *
+              Math.PI) /
+            180;
+
+          if (center) {
+            ctx.save();
+
+            ctx.beginPath();
+
+            ctx.arc(
+              center.x,
+              center.y,
+              radius,
+              start,
+              end,
+              false
+            );
+
+            ctx.strokeStyle =
+              live.color ||
+              strokeColor ||
+              "#2563eb";
+
+            ctx.lineWidth =
+              live.width ||
+              strokeWidth ||
+              2;
+
+            ctx.setLineDash([
+              7,
+              5,
+            ]);
+
+            ctx.stroke();
+
+            ctx.restore();
+
+            drawMeasurementLabel(
+              ctx,
+              `R = ${formatCm(
+                pointsToCm(radius)
+              )}`,
+              center.x +
+              radius +
+              12,
+              center.y
+            );
+
+            const angleDifference =
+              Math.abs(
+                getSignedAngleDifference(
+                  Number(
+                    live.startAngle
+                  ),
+                  Number(
+                    live.endAngle
+                  )
+                )
+              );
+
+            const labelAngle =
               (Number(
                 live.endAngle
               ) *
                 Math.PI) /
               180;
 
-            if (center) {
-              ctx.save();
-
-              ctx.beginPath();
-
-              ctx.arc(
-                center.x,
-                center.y,
-                radius,
-                start,
-                end,
-                false
-              );
-
-              ctx.strokeStyle =
-                live.color ||
-                strokeColor ||
-                "#2563eb";
-
-              ctx.lineWidth =
-                live.width ||
-                strokeWidth ||
-                2;
-
-              ctx.setLineDash([
-                7,
-                5,
-              ]);
-
-              ctx.stroke();
-
-              ctx.restore();
-
-              drawMeasurementLabel(
-                ctx,
-                `R = ${formatCm(
-                  pointsToCm(radius)
-                )}`,
-                center.x +
-                  radius +
-                  12,
-                center.y
-              );
-
-              const angleDifference =
-                Math.abs(
-                  getSignedAngleDifference(
-                    Number(
-                      live.startAngle
-                    ),
-                    Number(
-                      live.endAngle
-                    )
-                  )
-                );
-
-              const labelAngle =
-                (Number(
-                  live.endAngle
-                ) *
-                  Math.PI) /
-                180;
-
-              drawMeasurementLabel(
-                ctx,
-                `Angle = ${angleDifference.toFixed(
-                  1
-                )}°`,
-                center.x +
-                  Math.cos(
-                    labelAngle
-                  ) *
-                    radius *
-                    0.72,
-                center.y +
-                  Math.sin(
-                    labelAngle
-                  ) *
-                    radius *
-                    0.72
-              );
-            }
+            drawMeasurementLabel(
+              ctx,
+              `Angle = ${angleDifference.toFixed(
+                1
+              )}°`,
+              center.x +
+              Math.cos(
+                labelAngle
+              ) *
+              radius *
+              0.72,
+              center.y +
+              Math.sin(
+                labelAngle
+              ) *
+              radius *
+              0.72
+            );
           }
         }
+      }
 
       /* ---------------------------------------------------
          ANGLE DRAFT
@@ -1311,7 +1311,7 @@ export default function GeometryLayer({
 
         const compassRightClick =
           activeTool ===
-            "compass" &&
+          "compass" &&
           isRightClick;
 
         if (
@@ -1339,7 +1339,7 @@ export default function GeometryLayer({
           canvas.setPointerCapture(
             event.pointerId
           );
-        } catch {}
+        } catch { }
 
         /* ===================================================
            LINE
@@ -1347,7 +1347,7 @@ export default function GeometryLayer({
 
         if (
           activeTool ===
-            "line" &&
+          "line" &&
           isLeftClick
         ) {
           beginLine(point);
@@ -1360,7 +1360,7 @@ export default function GeometryLayer({
 
         if (
           activeTool ===
-            "circle" &&
+          "circle" &&
           isLeftClick
         ) {
           beginCircle(point);
@@ -1373,7 +1373,7 @@ export default function GeometryLayer({
 
         if (
           activeTool ===
-            "angle" &&
+          "angle" &&
           isLeftClick
         ) {
           const step =
@@ -1391,9 +1391,9 @@ export default function GeometryLayer({
 
             if (
               existingHit?.object?.type ===
-                "angle" &&
+              "angle" &&
               existingHit.part ===
-                "close"
+              "close"
             ) {
               removeGeometryObject(
                 existingHit.object.id
@@ -1551,7 +1551,7 @@ export default function GeometryLayer({
 
         if (
           activeTool ===
-            "select" &&
+          "select" &&
           isLeftClick
         ) {
           const hit =
@@ -1612,43 +1612,43 @@ export default function GeometryLayer({
               center:
                 object.center
                   ? {
-                      ...object.center,
-                    }
+                    ...object.center,
+                  }
                   : undefined,
 
               start:
                 object.start
                   ? {
-                      ...object.start,
-                    }
+                    ...object.start,
+                  }
                   : undefined,
 
               end:
                 object.end
                   ? {
-                      ...object.end,
-                    }
+                    ...object.end,
+                  }
                   : undefined,
 
               A:
                 object.A
                   ? {
-                      ...object.A,
-                    }
+                    ...object.A,
+                  }
                   : undefined,
 
               B:
                 object.B
                   ? {
-                      ...object.B,
-                    }
+                    ...object.B,
+                  }
                   : undefined,
 
               C:
                 object.C
                   ? {
-                      ...object.C,
-                    }
+                    ...object.C,
+                  }
                   : undefined,
             },
           };
@@ -1665,7 +1665,7 @@ export default function GeometryLayer({
             activeTool
           ) &&
           activeTool !==
-            "compass" &&
+          "compass" &&
           isLeftClick
         ) {
           const hit =
@@ -1784,12 +1784,12 @@ export default function GeometryLayer({
           ------------------------------------------------- */
 
           if (
-            isRightClick &&
+            isLeftClick &&
             hit &&
             hit.object.type ===
-              "compass" &&
+            "compass" &&
             hit.part ===
-              "pencil"
+            "pencil"
           ) {
             const compass =
               hit.object;
@@ -1900,9 +1900,9 @@ export default function GeometryLayer({
 
               if (
                 hit.part ===
-                  "draw_circle" ||
+                "draw_circle" ||
                 hit.part ===
-                  "quickDraw"
+                "quickDraw"
               ) {
                 const compass =
                   hit.object;
@@ -2028,7 +2028,7 @@ export default function GeometryLayer({
 
           setHoveredObjectId(
             hit?.object?.id ||
-              null
+            null
           );
         }
 
@@ -2042,7 +2042,7 @@ export default function GeometryLayer({
 
         if (
           activeTool ===
-            "circle" &&
+          "circle" &&
           !dragStateRef.current
         ) {
           const hit =
@@ -2064,7 +2064,7 @@ export default function GeometryLayer({
 
         if (
           activeTool ===
-            "angle" &&
+          "angle" &&
           angleDraftRef.current
         ) {
           const draft =
@@ -2191,16 +2191,16 @@ export default function GeometryLayer({
                     x:
                       current.start.x +
                       len *
-                        Math.cos(rad),
+                      Math.cos(rad),
 
                     y:
                       current.start.y +
                       len *
-                        Math.sin(rad),
+                      Math.sin(rad),
                   };
                 }
               }
-            } catch {}
+            } catch { }
           }
 
           const updated = {
@@ -2254,10 +2254,10 @@ export default function GeometryLayer({
             measurementAngle:
               Math.atan2(
                 point.y -
-                  current.center.y,
+                current.center.y,
 
                 point.x -
-                  current.center.x
+                current.center.x
               ),
           };
 
@@ -2300,10 +2300,10 @@ export default function GeometryLayer({
           const snappedDelta =
             snapToTools
               ? snapSignedDeltaToIncrement(
-                  delta,
-                  15,
-                  1.5
-                )
+                delta,
+                15,
+                1.5
+              )
               : null;
 
           const endAngle =
@@ -2428,13 +2428,13 @@ export default function GeometryLayer({
                 const nearestSteps =
                   Math.round(
                     rawRadius /
-                      halfCmStep
+                    halfCmStep
                   ) * halfCmStep;
 
                 if (
                   Math.abs(
                     rawRadius -
-                      nearestSteps
+                    nearestSteps
                   ) <= 4
                 ) {
                   radius =
@@ -2497,7 +2497,7 @@ export default function GeometryLayer({
                     0) +
                   (original.width ??
                     0) /
-                    2,
+                  2,
 
                 y:
                   original.y ?? 0,
@@ -2524,7 +2524,7 @@ export default function GeometryLayer({
               const rawRotation =
                 currentRotation +
                 delta *
-                  ROTATE_DAMPING;
+                ROTATE_DAMPING;
 
               // Let common drafting angles "catch" the
               // rotation once it's close, like a magnetic
@@ -2532,10 +2532,10 @@ export default function GeometryLayer({
               const snappedRulerRotation =
                 snapToTools
                   ? snapAngleToIncrement(
-                      rawRotation,
-                      15,
-                      1.5
-                    )
+                    rawRotation,
+                    15,
+                    1.5
+                  )
                   : null;
 
               const rotation =
@@ -2559,14 +2559,14 @@ export default function GeometryLayer({
               const newWidth =
                 clamp(
                   point.x -
-                    (original.x ??
-                      0),
+                  (original.x ??
+                    0),
 
                   RulerModel.MIN_LENGTH ||
-                    120,
+                  120,
 
                   RulerModel.MAX_LENGTH ||
-                    2400
+                  2400
                 );
 
               updateGeometryObject(
@@ -2634,15 +2634,15 @@ export default function GeometryLayer({
               const rawRotation =
                 currentRotation +
                 delta *
-                  ROTATE_DAMPING;
+                ROTATE_DAMPING;
 
               const snappedProtractorRotation =
                 snapToTools
                   ? snapAngleToIncrement(
-                      rawRotation,
-                      15,
-                      1.5
-                    )
+                    rawRotation,
+                    15,
+                    1.5
+                  )
                   : null;
 
               const rotation =
@@ -2716,9 +2716,9 @@ export default function GeometryLayer({
 
           if (
             object.type ===
-              "setSquare45" ||
+            "setSquare45" ||
             object.type ===
-              "setSquare60"
+            "setSquare60"
           ) {
             if (
               drag.part ===
@@ -3120,9 +3120,9 @@ export default function GeometryLayer({
 
           if (
             object.x !==
-              undefined ||
+            undefined ||
             object.y !==
-              undefined
+            undefined
           ) {
             updateGeometryObject(
               object.id,
@@ -3262,7 +3262,7 @@ export default function GeometryLayer({
               line.start,
               line.end
             ) >=
-              MIN_DRAW_DISTANCE
+            MIN_DRAW_DISTANCE
           ) {
             addGeometryObject({
               ...line,
@@ -3289,7 +3289,7 @@ export default function GeometryLayer({
           if (
             circle &&
             Number(circle.radius) >=
-              MIN_DRAW_DISTANCE
+            MIN_DRAW_DISTANCE
           ) {
             const finalCircle = {
               ...circle,
@@ -3343,11 +3343,11 @@ export default function GeometryLayer({
                   arc.startAngle,
                   arc.endAngle,
                   arc.color ||
-                    strokeColor ||
-                    "#2563eb",
+                  strokeColor ||
+                  "#2563eb",
                   arc.width ||
-                    strokeWidth ||
-                    2
+                  strokeWidth ||
+                  2
                 );
 
               if (finalArc) {
@@ -3383,7 +3383,7 @@ export default function GeometryLayer({
             canvas.releasePointerCapture(
               event.pointerId
             );
-          } catch {}
+          } catch { }
         }
       },
       [
@@ -3432,9 +3432,9 @@ export default function GeometryLayer({
 
         if (
           event.key !==
-            "Delete" &&
+          "Delete" &&
           event.key !==
-            "Backspace"
+          "Backspace"
         ) {
           return;
         }
