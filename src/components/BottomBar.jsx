@@ -1,0 +1,193 @@
+import React from 'react';
+import { useStore } from '../state/StoreContext';
+import {
+  IconPrev,
+  IconNext,
+  IconZoomIn,
+  IconZoomOut,
+  IconFitPage,
+  IconUndo,
+  IconRedo
+} from '../assets/math-icons';
+
+export default function BottomBar() {
+  const {
+    currentPage,
+    totalPages,
+    nextPage,
+    prevPage,
+    addBlankPage,
+    zoom,
+    setZoom,
+    zoomIn,
+    zoomOut,
+    fitPage,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    liveCoords
+  } = useStore();
+
+  const zoomPercent = Math.round(zoom * 100);
+
+  const zoomPresets = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+  return (
+    <footer style={{
+      height: 'var(--bottombar-height)',
+      background: 'var(--bg-panel)',
+      borderTop: '1px solid var(--border-color)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 16px',
+      zIndex: 100
+    }}>
+      {/* Left: Page Navigation */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={prevPage}
+          disabled={currentPage <= 1}
+          data-tooltip="Previous Page"
+        >
+          <IconPrev size={16} />
+        </button>
+
+        <div style={{
+          padding: '4px 12px',
+          background: 'rgba(0, 0, 0, 0.25)',
+          borderRadius: '6px',
+          border: '1px solid var(--border-color)',
+          fontSize: '12px',
+          fontFamily: 'var(--font-mono)',
+          fontWeight: 600,
+          color: 'var(--text-primary)'
+        }}>
+          Page {currentPage} / {totalPages}
+        </div>
+
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={nextPage}
+          disabled={currentPage >= totalPages}
+          data-tooltip="Next Page"
+        >
+          <IconNext size={16} />
+        </button>
+
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={addBlankPage}
+          data-tooltip="Add Blank Page"
+          style={{ fontSize: '11px', color: 'var(--math-cyan)', gap: '4px' }}
+        >
+          <span>+ Page</span>
+        </button>
+      </div>
+
+      {/* Center: Live Mathematical Coordinates & Angle Snapping Status */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        fontSize: '11px',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--text-muted)'
+      }}>
+        <span>
+          X: <strong style={{ color: 'var(--text-primary)' }}>{Math.round(liveCoords.x)}</strong> pt
+        </span>
+        <span>
+          Y: <strong style={{ color: 'var(--text-primary)' }}>{Math.round(liveCoords.y)}</strong> pt
+        </span>
+        <span style={{ color: 'var(--border-color)' }}>|</span>
+        <span>
+          {(liveCoords.x / 28.3465).toFixed(1)} cm, {(liveCoords.y / 28.3465).toFixed(1)} cm
+        </span>
+      </div>
+
+      {/* Right: Zoom & History */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={undo}
+          disabled={!canUndo}
+          data-tooltip="Undo (Ctrl+Z)"
+        >
+          <IconUndo size={16} />
+        </button>
+
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={redo}
+          disabled={!canRedo}
+          data-tooltip="Redo (Ctrl+Y)"
+        >
+          <IconRedo size={16} />
+        </button>
+
+        <div style={{
+          height: '18px',
+          width: '1px',
+          background: 'var(--border-color)',
+          margin: '0 4px'
+        }} />
+
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={zoomOut}
+          data-tooltip="Zoom Out (-25%)"
+        >
+          <IconZoomOut size={16} />
+        </button>
+
+        {/* Zoom selector */}
+        <select
+          value={zoomPresets.includes(zoom) ? zoom : ''}
+          onChange={(e) => setZoom(Number(e.target.value))}
+          style={{
+            background: 'rgba(0, 0, 0, 0.3)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            fontSize: '12px',
+            fontFamily: 'var(--font-mono)',
+            cursor: 'pointer',
+            outline: 'none'
+          }}
+        >
+          <option value="" disabled>{zoomPercent}%</option>
+          {zoomPresets.map(pz => (
+            <option key={pz} value={pz}>{Math.round(pz * 100)}%</option>
+          ))}
+        </select>
+
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={zoomIn}
+          data-tooltip="Zoom In (+25%)"
+        >
+          <IconZoomIn size={16} />
+        </button>
+
+        <button
+          className="touch-btn tooltip-wrap"
+          onClick={() => {
+            const viewport = document.getElementById('geocanvas-viewport');
+            if (viewport) {
+              fitPage(viewport.clientWidth, viewport.clientHeight);
+            } else {
+              fitPage(800, 600);
+            }
+          }}
+          data-tooltip="Fit Page to Screen"
+        >
+          <IconFitPage size={16} />
+        </button>
+      </div>
+    </footer>
+  );
+}
