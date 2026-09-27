@@ -352,7 +352,7 @@ export default function TopBar({
 
             <div className="about-logo-area">
               <img
-                src="/src/components/My logo.png"
+                src="/src/assets/My logo.jsx"
                 alt="My Logo"
                 className="about-logo"
               />
