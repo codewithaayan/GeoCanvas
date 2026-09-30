@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { PDFDocument } from 'pdf-lib';
 
 // Configure PDF.js worker
 try {
@@ -34,15 +35,39 @@ export async function loadPdfDocument(source, fileName = 'Document.pdf') {
       throw new Error('Invalid PDF header');
     }
 
-    // IMPORTANT: pdf.js can transfer/detach the ArrayBuffer it's given
-    // (it hands `data` off to its worker as a Transferable for speed).
-    // We hand pdf.js its own CLONE and keep `data` intact, because
-    // `data` is also returned below and later reused by pdf-lib for
-    // saveProject()/exportPdf(). Without this clone, pdf.js silently
-    // detaches the original buffer, and any later
-    // `PDFDocument.load(pdfArrayBuffer)` call in pdfExporter.js/db.js
-    // fails (or saves 0 bytes) even though the PDF opened/rendered fine.
-    const loadingTask = pdfjsLib.getDocument({ data: data.slice(0) });
+    // Check for embedded GeoCanvas editable layers in the PDF
+    let cleanData = data;
+    let embeddedPagesData = null;
+
+    try {
+      const pdfLibDoc = await PDFDocument.load(data.slice(0), { ignoreEncryption: true });
+      const subject = pdfLibDoc.getSubject();
+      if (subject && subject.startsWith('GEOCANVAS_DATA:')) {
+        const base64Str = subject.replace('GEOCANVAS_DATA:', '');
+        const jsonStr = decodeURIComponent(escape(atob(base64Str)));
+        const parsed = JSON.parse(jsonStr);
+        if (parsed && parsed.pagesData) {
+          embeddedPagesData = parsed.pagesData;
+          // Strip the added raster annotation stream so the underlying PDF is clean
+          if (parsed.hasAnnotationOverlay) {
+            const pages = pdfLibDoc.getPages();
+            for (const p of pages) {
+              const contents = p.node.Contents();
+              if (contents && typeof contents.size === 'function' && contents.size() > 1) {
+                contents.remove(contents.size() - 1);
+              }
+            }
+            const cleanBytes = await pdfLibDoc.save();
+            cleanData = cleanBytes.buffer;
+          }
+        }
+      }
+    } catch (metaErr) {
+      console.warn('Could not inspect embedded GeoCanvas metadata:', metaErr);
+    }
+
+    // Hand pdf.js its own clone of cleanData so original remains intact
+    const loadingTask = pdfjsLib.getDocument({ data: cleanData.slice(0) });
     const pdfDoc = await loadingTask.promise;
 
     if (!pdfDoc || pdfDoc.numPages <= 0) {
@@ -58,9 +83,10 @@ export async function loadPdfDocument(source, fileName = 'Document.pdf') {
       pdfDoc,
       numPages: pdfDoc.numPages,
       fileName,
-      arrayBuffer: data,
+      arrayBuffer: cleanData,
       naturalWidth: viewport.width,
-      naturalHeight: viewport.height
+      naturalHeight: viewport.height,
+      embeddedPagesData
     };
   } catch (err) {
     console.error('PDF Load Error:', err);

@@ -10,9 +10,13 @@ import { useStore } from '../state/StoreContext';
 import { PenTool } from '../tools/PenTool';
 import { EraserTool } from '../tools/EraserTool';
 import { TextTool } from '../tools/TextTool';
+import { MagicPenTool } from '../tools/MagicPenTool';
+import { LaserTool } from '../tools/LaserTool';
 
 const ANNOTATION_TOOLS = [
   'pen',
+  'magicPen',
+  'laser',
   'highlighter',
   'eraser',
   'text'
@@ -21,7 +25,8 @@ const ANNOTATION_TOOLS = [
 export default function AnnotationLayer({
   width,
   height,
-  zoom
+  zoom,
+  pageNum
 }) {
   const {
     activeTool,
@@ -35,7 +40,9 @@ export default function AnnotationLayer({
 
     eraserSize,
 
+    currentPage,
     currentPageData,
+    pages,
 
     addAnnotation,
     setPageAnnotations,
@@ -44,10 +51,17 @@ export default function AnnotationLayer({
     setLiveCoords
   } = useStore();
 
+  const targetPageNum = pageNum || currentPage;
+  const pageAnnotations = (pages && pages[targetPageNum]?.annotations) || currentPageData?.annotations || [];
+
   const canvasRef = useRef(null);
   const activeStrokeRef = useRef(null);
   const annotationsRef = useRef([]);
   const animationFrameRef = useRef(null);
+  const activeTouchesRef = useRef(new Map());
+
+  const laserTrailRef = useRef(null);
+  const laserAnimIdRef = useRef(null);
 
   const eraseHistoryCapturedRef = useRef(false);
 
@@ -70,14 +84,13 @@ export default function AnnotationLayer({
   // =========================================================
 
   useEffect(() => {
-    annotationsRef.current =
-      currentPageData?.annotations || [];
+    annotationsRef.current = pageAnnotations;
 
     // Redraw whenever page annotations change.
     requestAnimationFrame(() => {
       renderCanvas();
     });
-  }, [currentPageData]);
+  }, [pageAnnotations]);
 
   // =========================================================
   // DOCUMENT COORDINATES
@@ -211,6 +224,18 @@ export default function AnnotationLayer({
       PenTool.drawStroke(
         ctx,
         activeStrokeRef.current
+      );
+    }
+
+    // -------------------------------------------------------
+    // LASER TRAIL (GOODNOTES STYLE)
+    // -------------------------------------------------------
+
+    if (laserTrailRef.current) {
+      LaserTool.draw(
+        ctx,
+        laserTrailRef.current,
+        cursorPoint
       );
     }
 
@@ -386,7 +411,8 @@ export default function AnnotationLayer({
           updated;
 
         setPageAnnotations(
-          updated
+          updated,
+          targetPageNum
         );
 
         scheduleRender();
@@ -395,9 +421,30 @@ export default function AnnotationLayer({
         eraserSize,
         pushHistory,
         setPageAnnotations,
-        scheduleRender
+        scheduleRender,
+        targetPageNum
       ]
     );
+
+  // =========================================================
+  // LASER LOOP
+  // =========================================================
+
+  const startLaserLoop = useCallback(() => {
+    if (laserAnimIdRef.current) return;
+    const loop = () => {
+      const active = laserTrailRef.current && LaserTool.update(laserTrailRef.current);
+      scheduleRender();
+      if (active) {
+        laserAnimIdRef.current = requestAnimationFrame(loop);
+      } else {
+        laserTrailRef.current = null;
+        laserAnimIdRef.current = null;
+        scheduleRender();
+      }
+    };
+    laserAnimIdRef.current = requestAnimationFrame(loop);
+  }, [scheduleRender]);
 
   // =========================================================
   // POINTER DOWN
@@ -412,6 +459,18 @@ export default function AnnotationLayer({
       return;
     }
 
+    // Touch screen handling: multi-touch palm/pinch rejection
+    if (e.pointerType === 'touch') {
+      activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activeTouchesRef.current.size >= 2) {
+        // Multi-touch pinch detected! Cancel drawing immediately so two fingers do NOT draw lines!
+        activeStrokeRef.current = null;
+        setIsDrawing(false);
+        scheduleRender();
+        return;
+      }
+    }
+
     e.preventDefault();
 
     const point =
@@ -421,11 +480,12 @@ export default function AnnotationLayer({
     setCursorPoint(point);
 
     // -------------------------------------------------------
-    // PEN / HIGHLIGHTER
+    // PEN / MAGIC PEN / HIGHLIGHTER
     // -------------------------------------------------------
 
     if (
       activeTool === 'pen' ||
+      activeTool === 'magicPen' ||
       activeTool === 'highlighter'
     ) {
       try {
@@ -441,7 +501,7 @@ export default function AnnotationLayer({
         PenTool.createStroke(
           point,
           {
-            tool: activeTool,
+            tool: isHighlighter ? 'highlighter' : 'pen',
 
             color: isHighlighter
               ? highlighterColor
@@ -461,6 +521,38 @@ export default function AnnotationLayer({
         stroke;
 
       setIsDrawing(true);
+
+      scheduleRender();
+
+      return;
+    }
+
+    // -------------------------------------------------------
+    // LASER TOOL (GOODNOTES STYLE)
+    // -------------------------------------------------------
+
+    if (activeTool === 'laser') {
+      try {
+        e.currentTarget.setPointerCapture(
+          e.pointerId
+        );
+      } catch {}
+
+      const laser =
+        LaserTool.createLaser(
+          point,
+          {
+            color: strokeColor || '#ef4444',
+            width: strokeWidth ? strokeWidth * 2 : 6
+          }
+        );
+
+      laserTrailRef.current =
+        laser;
+
+      setIsDrawing(true);
+
+      startLaserLoop();
 
       scheduleRender();
 
@@ -514,6 +606,13 @@ export default function AnnotationLayer({
       return;
     }
 
+    // Multi-touch protection: don't draw if multiple fingers are touching
+    if (e.pointerType === 'touch') {
+      if (activeTouchesRef.current.size >= 2) {
+        return;
+      }
+    }
+
     const point =
       getDocCoordinates(e);
 
@@ -530,11 +629,24 @@ export default function AnnotationLayer({
     }
 
     // -------------------------------------------------------
-    // PEN / HIGHLIGHTER
+    // LASER TOOL
+    // -------------------------------------------------------
+
+    if (activeTool === 'laser') {
+      if (laserTrailRef.current) {
+        LaserTool.addPoint(laserTrailRef.current, point);
+        scheduleRender();
+      }
+      return;
+    }
+
+    // -------------------------------------------------------
+    // PEN / MAGIC PEN / HIGHLIGHTER
     // -------------------------------------------------------
 
     if (
       activeTool === 'pen' ||
+      activeTool === 'magicPen' ||
       activeTool === 'highlighter'
     ) {
       const stroke =
@@ -582,34 +694,51 @@ export default function AnnotationLayer({
   // =========================================================
 
   const finishDrawing = e => {
+    if (e?.pointerType === 'touch') {
+      activeTouchesRef.current.delete(e.pointerId);
+    }
+
     if (!isDrawing) {
       return;
     }
 
-    e.preventDefault();
+    if (e?.preventDefault) {
+      e.preventDefault();
+    }
 
     setIsDrawing(false);
 
     try {
-      e.currentTarget.releasePointerCapture(
+      e?.currentTarget?.releasePointerCapture(
         e.pointerId
       );
     } catch {}
 
+    // Laser trail self-dissolves, never saved permanently
+    if (activeTool === 'laser') {
+      scheduleRender();
+      return;
+    }
+
     // -------------------------------------------------------
-    // FINISH PEN / HIGHLIGHTER
+    // FINISH PEN / MAGIC PEN / HIGHLIGHTER
     // -------------------------------------------------------
 
     if (
       activeStrokeRef.current
     ) {
-      const stroke =
+      let stroke =
         activeStrokeRef.current;
 
       if (
         stroke.points &&
         stroke.points.length > 0
       ) {
+        // Auto-correct shape if Magic Pen is active
+        if (activeTool === 'magicPen') {
+          stroke = MagicPenTool.autoCorrectStroke(stroke);
+        }
+
         /*
          * Keep local reference immediately
          * so the stroke appears without waiting
@@ -620,7 +749,7 @@ export default function AnnotationLayer({
           stroke
         ];
 
-        addAnnotation(stroke);
+        addAnnotation(stroke, targetPageNum);
       }
 
       activeStrokeRef.current =
@@ -642,6 +771,10 @@ export default function AnnotationLayer({
   // =========================================================
 
   const handlePointerCancel = e => {
+    if (e?.pointerType === 'touch') {
+      activeTouchesRef.current.delete(e.pointerId);
+    }
+
     setIsDrawing(false);
 
     activeStrokeRef.current =
@@ -651,7 +784,7 @@ export default function AnnotationLayer({
       false;
 
     try {
-      e.currentTarget.releasePointerCapture(
+      e?.currentTarget?.releasePointerCapture(
         e.pointerId
       );
     } catch {}
@@ -690,7 +823,8 @@ export default function AnnotationLayer({
         ];
 
         addAnnotation(
-          annotation
+          annotation,
+          targetPageNum
         );
       }
 
@@ -702,7 +836,8 @@ export default function AnnotationLayer({
     }, [
       editingText,
       strokeColor,
-      addAnnotation
+      addAnnotation,
+      targetPageNum
     ]);
 
   // =========================================================
@@ -754,6 +889,14 @@ export default function AnnotationLayer({
     cursor = 'none';
   }
 
+  if (activeTool === 'laser') {
+    cursor = 'crosshair';
+  }
+
+  if (activeTool === 'pan') {
+    cursor = 'grab';
+  }
+
   // =========================================================
   // RENDER
   // =========================================================
@@ -774,7 +917,7 @@ export default function AnnotationLayer({
         zIndex: 10,
 
         pointerEvents:
-          isInteractive
+          isInteractive && activeTool !== 'pan'
             ? 'auto'
             : 'none'
       }}

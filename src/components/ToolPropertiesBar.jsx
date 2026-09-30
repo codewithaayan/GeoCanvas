@@ -94,6 +94,7 @@ export default function ToolPropertiesBar() {
       </div>
 
       {(activeTool === 'pen' ||
+        activeTool === 'magicPen' ||
         activeTool === 'line' ||
         activeTool === 'circle' ||
         activeTool === 'angle') && (
@@ -303,6 +304,55 @@ export default function ToolPropertiesBar() {
             </span>
           </div>
         </>
+      )}
+
+      {activeTool === 'laser' && (
+        <>
+          <div className="property-group">
+            <span className="property-label">Laser Color</span>
+            <div className="color-row">
+              {[
+                { label: 'Laser Red', value: '#ef4444' },
+                { label: 'Neon Emerald', value: '#10b981' },
+                { label: 'Neon Cyan', value: '#06b6d4' },
+                { label: 'Electric Amber', value: '#f59e0b' }
+              ].map(c => (
+                <button
+                  key={c.value}
+                  onClick={() => setStrokeColor(c.value)}
+                  className={strokeColor === c.value ? 'color-dot selected' : 'color-dot'}
+                  style={{ background: c.value }}
+                  title={c.label}
+                  aria-label={c.label}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="property-divider" />
+          <div className="property-group">
+            <span className="property-label">Width</span>
+            <div className="option-row">
+              {[4, 6, 8, 12].map(w => (
+                <button
+                  key={w}
+                  onClick={() => setStrokeWidth(w)}
+                  className={strokeWidth === w ? 'property-option active' : 'property-option'}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+          </div>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '12px' }}>
+            Trail self-dissolves automatically
+          </span>
+        </>
+      )}
+
+      {activeTool === 'pan' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          <span>👋 <strong>Hand Tool</strong>: Slide finger or drag mouse to scroll across pages smoothly. Pinch with 2 fingers to zoom.</span>
+        </div>
       )}
 
       <div className="snap-control">

@@ -684,26 +684,34 @@ export class ProtractorModel {
 
     /*
      * -----------------------------------------------------
-     * INNER SEMICIRCLE
+     * DUAL-SCALE DIVIDER ARCS
      * -----------------------------------------------------
      */
 
+    // Divider arc between outer (0-180) and inner (180-0) scales
     ctx.beginPath();
-
     ctx.arc(
       x,
       y,
-      radius * 0.72,
+      radius - 35,
       Math.PI,
       2 * Math.PI
     );
+    ctx.strokeStyle = 'rgba(71,85,105,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
-    ctx.strokeStyle =
-      'rgba(71,85,105,0.35)';
-
-    ctx.lineWidth =
-      1;
-
+    // Baseline arc for inner degree scale
+    ctx.beginPath();
+    ctx.arc(
+      x,
+      y,
+      radius * 0.68,
+      Math.PI,
+      2 * Math.PI
+    );
+    ctx.strokeStyle = 'rgba(71,85,105,0.3)';
+    ctx.lineWidth = 0.8;
     ctx.stroke();
 
     /*
@@ -734,23 +742,43 @@ export class ProtractorModel {
         degree *
           DEG_TO_RAD;
 
-      const labelRadius =
-        radius - 31;
-
-      const labelX =
+      // Outer label (0 on left, 180 on right)
+      const outerLabelRadius =
+        radius - 28;
+      const outerX =
         x +
         Math.cos(angle) *
-          labelRadius;
-
-      const labelY =
+          outerLabelRadius;
+      const outerY =
         y +
         Math.sin(angle) *
-          labelRadius;
+          outerLabelRadius;
 
+      // Inner label (180 on left, 0 on right)
+      const innerDegree = 180 - degree;
+      const innerLabelRadius =
+        radius - 42;
+      const innerX =
+        x +
+        Math.cos(angle) *
+          innerLabelRadius;
+      const innerY =
+        y +
+        Math.sin(angle) *
+          innerLabelRadius;
+
+      ctx.font = '11px "JetBrains Mono", monospace';
       ctx.fillText(
         String(degree),
-        labelX,
-        labelY
+        outerX,
+        outerY
+      );
+
+      ctx.font = '10px "JetBrains Mono", monospace';
+      ctx.fillText(
+        String(innerDegree),
+        innerX,
+        innerY
       );
     }
 

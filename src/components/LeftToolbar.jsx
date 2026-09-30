@@ -5,8 +5,11 @@ import { useStore } from '../state/StoreContext';
 import {
   IconSelect,
   IconPen,
+  IconMagicPen,
   IconHighlighter,
+  IconLaser,
   IconEraser,
+  IconHand,
   IconText,
   IconLine,
   IconCircle,
@@ -31,9 +34,24 @@ export default function LeftToolbar() {
       icon: IconSelect
     },
     {
+      id: 'pan',
+      name: 'Hand (Touch Scroll & Pan)',
+      icon: IconHand
+    },
+    {
       id: 'pen',
       name: 'Ink Pen',
       icon: IconPen
+    },
+    {
+      id: 'magicPen',
+      name: 'Magic Pen (Auto-Correct Shapes)',
+      icon: IconMagicPen
+    },
+    {
+      id: 'laser',
+      name: 'Laser Tool (GoodNotes style)',
+      icon: IconLaser
     },
     {
       id: 'highlighter',

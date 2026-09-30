@@ -33,6 +33,30 @@ export default function BottomBar() {
 
   const zoomPresets = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
+  const handlePrev = () => {
+    if (currentPage > 1) {
+      prevPage();
+      const el = document.getElementById(`page-stage-${currentPage - 1}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const handleNext = () => {
+    if (currentPage < totalPages) {
+      nextPage();
+      const el = document.getElementById(`page-stage-${currentPage + 1}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const handleAddPage = () => {
+    addBlankPage();
+    setTimeout(() => {
+      const el = document.getElementById(`page-stage-${totalPages + 1}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
   return (
     <footer style={{
       height: 'var(--bottombar-height)',
@@ -48,7 +72,7 @@ export default function BottomBar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <button
           className="touch-btn tooltip-wrap"
-          onClick={prevPage}
+          onClick={handlePrev}
           disabled={currentPage <= 1}
           data-tooltip="Previous Page"
         >
@@ -70,7 +94,7 @@ export default function BottomBar() {
 
         <button
           className="touch-btn tooltip-wrap"
-          onClick={nextPage}
+          onClick={handleNext}
           disabled={currentPage >= totalPages}
           data-tooltip="Next Page"
         >
@@ -79,7 +103,7 @@ export default function BottomBar() {
 
         <button
           className="touch-btn tooltip-wrap"
-          onClick={addBlankPage}
+          onClick={handleAddPage}
           data-tooltip="Add Blank Page"
           style={{ fontSize: '11px', color: 'var(--math-cyan)', gap: '4px' }}
         >

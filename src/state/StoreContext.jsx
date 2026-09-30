@@ -287,20 +287,31 @@ export function StoreProvider({ children }) {
             height: result.naturalHeight
           });
 
-          const newPages = {};
+          if (result.embeddedPagesData) {
+            setPages(result.embeddedPagesData);
+            setStatusMessage(
+              `Loaded "${result.fileName}" with re-editable vector layers!`
+            );
+          } else {
+            const newPages = {};
 
-          for (
-            let i = 1;
-            i <= result.numPages;
-            i++
-          ) {
-            newPages[i] = {
-              annotations: [],
-              geometryObjects: []
-            };
+            for (
+              let i = 1;
+              i <= result.numPages;
+              i++
+            ) {
+              newPages[i] = {
+                annotations: [],
+                geometryObjects: []
+              };
+            }
+
+            setPages(newPages);
+
+            setStatusMessage(
+              `Loaded "${result.fileName}" (${result.numPages} pages)`
+            );
           }
-
-          setPages(newPages);
 
           undoStackRef.current = [];
           redoStackRef.current = [];
@@ -310,13 +321,9 @@ export function StoreProvider({ children }) {
 
           setSelectedObjectId(null);
 
-          setStatusMessage(
-            `Loaded "${result.fileName}" (${result.numPages} pages)`
-          );
-
           setTimeout(() => {
             setStatusMessage(null);
-          }, 3000);
+          }, 3500);
         } else {
           setStatusMessage(
             result.error
@@ -339,19 +346,20 @@ export function StoreProvider({ children }) {
   // =========================================================
 
   const addAnnotation = useCallback(
-    annotation => {
+    (annotation, targetPage) => {
       pushHistory();
 
       setPages(prev => {
+        const pageNum = targetPage || currentPage;
         const pageData =
-          prev[currentPage] || {
+          prev[pageNum] || {
             annotations: [],
             geometryObjects: []
           };
 
         return {
           ...prev,
-          [currentPage]: {
+          [pageNum]: {
             ...pageData,
             annotations: [
               ...pageData.annotations,
@@ -366,17 +374,18 @@ export function StoreProvider({ children }) {
 
   const setPageAnnotations =
     useCallback(
-      newAnnotations => {
+      (newAnnotations, targetPage) => {
         setPages(prev => {
+          const pageNum = targetPage || currentPage;
           const pageData =
-            prev[currentPage] || {
+            prev[pageNum] || {
               annotations: [],
               geometryObjects: []
             };
 
           return {
             ...prev,
-            [currentPage]: {
+            [pageNum]: {
               ...pageData,
               annotations: newAnnotations
             }
@@ -392,19 +401,20 @@ export function StoreProvider({ children }) {
 
   const addGeometryObject =
     useCallback(
-      obj => {
+      (obj, targetPage) => {
         pushHistory();
 
         setPages(prev => {
+          const pageNum = targetPage || currentPage;
           const pageData =
-            prev[currentPage] || {
+            prev[pageNum] || {
               annotations: [],
               geometryObjects: []
             };
 
           return {
             ...prev,
-            [currentPage]: {
+            [pageNum]: {
               ...pageData,
               geometryObjects: [
                 ...pageData.geometryObjects,
@@ -421,17 +431,18 @@ export function StoreProvider({ children }) {
 
   const updateGeometryObject =
     useCallback(
-      (id, updates) => {
+      (id, updates, targetPage) => {
         setPages(prev => {
+          const pageNum = targetPage || currentPage;
           const pageData =
-            prev[currentPage] || {
+            prev[pageNum] || {
               annotations: [],
               geometryObjects: []
             };
 
           return {
             ...prev,
-            [currentPage]: {
+            [pageNum]: {
               ...pageData,
               geometryObjects:
                 pageData.geometryObjects.map(
@@ -452,19 +463,20 @@ export function StoreProvider({ children }) {
 
   const removeGeometryObject =
     useCallback(
-      id => {
+      (id, targetPage) => {
         pushHistory();
 
         setPages(prev => {
+          const pageNum = targetPage || currentPage;
           const pageData =
-            prev[currentPage] || {
+            prev[pageNum] || {
               annotations: [],
               geometryObjects: []
             };
 
           return {
             ...prev,
-            [currentPage]: {
+            [pageNum]: {
               ...pageData,
               geometryObjects:
                 pageData.geometryObjects.filter(
@@ -485,12 +497,13 @@ export function StoreProvider({ children }) {
     );
 
   const clearCurrentPage =
-    useCallback(() => {
+    useCallback((targetPage) => {
       pushHistory();
+      const pageNum = targetPage || currentPage;
 
       setPages(prev => ({
         ...prev,
-        [currentPage]: {
+        [pageNum]: {
           annotations: [],
           geometryObjects: []
         }
@@ -510,6 +523,9 @@ export function StoreProvider({ children }) {
       if (
         [
           'pen',
+          'magicPen',
+          'laser',
+          'pan',
           'highlighter',
           'eraser',
           'text',
@@ -1028,6 +1044,7 @@ export function StoreProvider({ children }) {
         pdfFileName,
         totalPages,
         currentPage,
+        setCurrentPage,
         pageDimensions,
         currentPageData,
         pages,

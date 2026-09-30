@@ -15,7 +15,7 @@ import {
   IconUndo,
   IconRedo
 } from '../assets/math-icons';
-import myLogo from "../assets/My-logo.png";
+import myLogo from "../assets/My logo.png";
 
 export default function TopBar({
   onOpenSampleModal

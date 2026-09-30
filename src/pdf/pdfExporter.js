@@ -114,6 +114,29 @@ export async function exportCompletedPdf({
       }
     }
 
+    // Embed editable GeoCanvas layer metadata so re-importing allows full vector editing/erasing
+    try {
+      const geocanvasData = {
+        version: 1,
+        hasAnnotationOverlay: true,
+        pagesData,
+        totalPages,
+        exportedAt: new Date().toISOString()
+      };
+      const jsonStr = JSON.stringify(geocanvasData);
+      const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
+      pdfDoc.setSubject('GEOCANVAS_DATA:' + encoded);
+
+      // Also attach JSON file to the PDF as attachment for maximum compatibility
+      const encoder = new TextEncoder();
+      await pdfDoc.attach(encoder.encode(jsonStr), 'geocanvas_layers.json', {
+        mimeType: 'application/json',
+        description: 'GeoCanvas Editable Vector Layers'
+      });
+    } catch (metaErr) {
+      console.warn('Could not embed vector layer metadata into PDF:', metaErr);
+    }
+
     const pdfBytes = await pdfDoc.save();
     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
     const downloadUrl = URL.createObjectURL(blob);

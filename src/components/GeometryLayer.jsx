@@ -394,17 +394,20 @@ export default function GeometryLayer({
   width: pageWidth,
   height: pageHeight,
   zoom,
+  pageNum,
 }) {
   const {
     activeTool,
+    currentPage,
     currentPageData,
+    pages,
 
     selectedObjectId,
     setSelectedObjectId,
 
-    addGeometryObject,
-    updateGeometryObject,
-    removeGeometryObject,
+    addGeometryObject: storeAddGeometryObject,
+    updateGeometryObject: storeUpdateGeometryObject,
+    removeGeometryObject: storeRemoveGeometryObject,
 
     strokeColor,
     strokeWidth,
@@ -415,6 +418,23 @@ export default function GeometryLayer({
 
     snapToTools,
   } = useStore();
+
+  const targetPageNum = pageNum || currentPage;
+
+  const addGeometryObject = useCallback(
+    (obj) => storeAddGeometryObject(obj, targetPageNum),
+    [storeAddGeometryObject, targetPageNum]
+  );
+
+  const updateGeometryObject = useCallback(
+    (id, updates) => storeUpdateGeometryObject(id, updates, targetPageNum),
+    [storeUpdateGeometryObject, targetPageNum]
+  );
+
+  const removeGeometryObject = useCallback(
+    (id) => storeRemoveGeometryObject(id, targetPageNum),
+    [storeRemoveGeometryObject, targetPageNum]
+  );
 
   const canvasRef = useRef(null);
 
@@ -437,10 +457,12 @@ export default function GeometryLayer({
   ] = useState(null);
 
   const geometryObjects =
-    currentPageData?.geometryObjects || [];
+    (pages && pages[targetPageNum]?.geometryObjects) ||
+    currentPageData?.geometryObjects ||
+    [];
 
   const geometryIsInteractive =
-    GEOMETRY_TOOLS.includes(activeTool);
+    GEOMETRY_TOOLS.includes(activeTool) && activeTool !== 'pan';
 
   /* =========================================================
      RESET TEMPORARY STATE WHEN TOOL CHANGES

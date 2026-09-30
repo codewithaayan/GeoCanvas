@@ -210,3 +210,29 @@ export const IconClose = ({ size = 18, color = 'currentColor' }) => (
     <line x1="6" y1="6" x2="18" y2="18"/>
   </svg>
 );
+
+export const IconLaser = ({ size = 20, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+  </svg>
+);
+
+export const IconMagicPen = ({ size = 20, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m15 4 5 5L7 22H2v-5L15 4z"/>
+    <path d="M18.5 2.5 20 4l-1.5 1.5L17 4z" fill="currentColor"/>
+    <path d="M6 3 7 4.5 6 6 5 4.5z" fill="currentColor"/>
+    <path d="M3 10 4 11.5 3 13 2 11.5z" fill="currentColor"/>
+  </svg>
+);
+
+export const IconHand = ({ size = 20, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 11V6a2 2 0 0 0-4 0v4"/>
+    <path d="M14 10V4a2 2 0 0 0-4 0v6"/>
+    <path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>
+    <path d="M18 8a2 2 0 0 1 4 4v4a8 8 0 0 1-16 0v-2"/>
+  </svg>
+);
+
