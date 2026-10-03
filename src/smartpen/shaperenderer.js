@@ -4,7 +4,7 @@
  * selection frame with its handles. Pure drawing code, no state.
  */
 
-import { dist, resample, bounds, pt } from './geometryMath.js';
+import { dist, resample, bounds, pt } from './geometrymath.js';
 
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 

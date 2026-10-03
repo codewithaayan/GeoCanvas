@@ -4,7 +4,7 @@
  * Pure functions. Points keep their timestamp (`t`) and `pressure`.
  */
 
-import { dist } from './geometryMath.js';
+import { dist } from './geometrymath.js';
 
 /** Drop points closer than `minDist` to the previous kept point. */
 export function dedupe(points, minDist = 0.5) {
