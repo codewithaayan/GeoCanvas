@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 
 import { loadPdfDocument } from '../pdf/pdfLoader';
+import { removePdfPage } from '../pdf/pdfPages';
 import {
   saveProjectToDB,
   loadProjectFromDB
@@ -59,6 +60,24 @@ export function StoreProvider({ children }) {
 
   const [selectedObjectId, setSelectedObjectId] =
     useState(null);
+
+  // Selected ink stroke / smart shape: { id, pageNum } (Edit Shapes tool)
+  const [selectedInk, setSelectedInk] =
+    useState(null);
+
+  // Always holds the newest pages so history snapshots never depend on
+  // side effects inside state updater functions.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+
+  // Latest document state (page count, PDF...) for history snapshots
+  const docRef = useRef({});
+  docRef.current = {
+    totalPages,
+    currentPage,
+    pdfArrayBuffer,
+    pdfDoc
+  };
 
   // =========================================================
   // TOOLS
@@ -138,27 +157,60 @@ export function StoreProvider({ children }) {
   const [canRedo, setCanRedo] =
     useState(false);
 
+  const snapshotPages = () =>
+    JSON.parse(
+      JSON.stringify(pagesRef.current)
+    );
+
+  /*
+   * Snapshot of the whole document structure (pages + page count + PDF).
+   * Used for operations that change the number of pages, so undo can bring
+   * a deleted page back, including its PDF content.
+   */
+  const snapshotDocument = () => ({
+    __doc: true,
+    pages: snapshotPages(),
+    totalPages: docRef.current.totalPages,
+    currentPage: docRef.current.currentPage,
+    pdfArrayBuffer: docRef.current.pdfArrayBuffer,
+    pdfDoc: docRef.current.pdfDoc
+  });
+
+  const restoreEntry = entry => {
+    if (entry && entry.__doc) {
+      setPages(entry.pages);
+      setTotalPages(entry.totalPages);
+      setCurrentPage(entry.currentPage);
+      setPdfArrayBuffer(entry.pdfArrayBuffer);
+      setPdfDoc(entry.pdfDoc);
+      setSelectedObjectId(null);
+      setSelectedInk(null);
+    } else {
+      setPages(entry);
+    }
+  };
+
+  const pushEntry = entry => {
+    undoStackRef.current.push(entry);
+
+    if (
+      undoStackRef.current.length > 50
+    ) {
+      undoStackRef.current.shift();
+    }
+
+    redoStackRef.current = [];
+
+    setCanUndo(true);
+    setCanRedo(false);
+  };
+
   const pushHistory = useCallback(() => {
-    setPages(currentPages => {
-      undoStackRef.current.push(
-        JSON.parse(
-          JSON.stringify(currentPages)
-        )
-      );
+    pushEntry(snapshotPages());
+  }, []);
 
-      if (
-        undoStackRef.current.length > 50
-      ) {
-        undoStackRef.current.shift();
-      }
-
-      redoStackRef.current = [];
-
-      setCanUndo(true);
-      setCanRedo(false);
-
-      return currentPages;
-    });
+  const pushDocHistory = useCallback(() => {
+    pushEntry(snapshotDocument());
   }, []);
 
   const undo = useCallback(() => {
@@ -171,21 +223,19 @@ export function StoreProvider({ children }) {
     const previous =
       undoStackRef.current.pop();
 
-    setPages(current => {
-      redoStackRef.current.push(
-        JSON.parse(
-          JSON.stringify(current)
-        )
-      );
+    redoStackRef.current.push(
+      previous && previous.__doc
+        ? snapshotDocument()
+        : snapshotPages()
+    );
 
-      setCanUndo(
-        undoStackRef.current.length > 0
-      );
+    restoreEntry(previous);
 
-      setCanRedo(true);
+    setCanUndo(
+      undoStackRef.current.length > 0
+    );
 
-      return previous;
-    });
+    setCanRedo(true);
   }, []);
 
   const redo = useCallback(() => {
@@ -198,21 +248,19 @@ export function StoreProvider({ children }) {
     const next =
       redoStackRef.current.pop();
 
-    setPages(current => {
-      undoStackRef.current.push(
-        JSON.parse(
-          JSON.stringify(current)
-        )
-      );
+    undoStackRef.current.push(
+      next && next.__doc
+        ? snapshotDocument()
+        : snapshotPages()
+    );
 
-      setCanUndo(true);
+    restoreEntry(next);
 
-      setCanRedo(
-        redoStackRef.current.length > 0
-      );
+    setCanUndo(true);
 
-      return next;
-    });
+    setCanRedo(
+      redoStackRef.current.length > 0
+    );
   }, []);
 
   // =========================================================
@@ -267,14 +315,35 @@ export function StoreProvider({ children }) {
         setIsLoading(false);
 
         if (result.success) {
-          setPdfDoc(result.pdfDoc);
+          // Blank workspaces come back with pdfDoc = null (paper + grid
+          // are drawn by the app, exactly like before exporting)
+          setPdfDoc(result.pdfDoc || null);
           setPdfArrayBuffer(
-            result.arrayBuffer
+            result.arrayBuffer || null
           );
+
+          if (result.isBlankWorkspace) {
+            if (result.gridType) {
+              setGridType(result.gridType);
+            }
+
+            if (
+              result.theme &&
+              ['paper', 'blueprint', 'parchment', 'chalkboard'].includes(result.theme)
+            ) {
+              setTheme(result.theme);
+            }
+          }
 
           setPdfFileName(
             result.fileName
           );
+
+          // A newly opened document starts with a fresh undo history
+          undoStackRef.current = [];
+          redoStackRef.current = [];
+          setCanUndo(false);
+          setCanRedo(false);
 
           setTotalPages(
             result.numPages
@@ -365,6 +434,56 @@ export function StoreProvider({ children }) {
               ...pageData.annotations,
               annotation
             ]
+          }
+        };
+      });
+    },
+    [currentPage, pushHistory]
+  );
+
+  /*
+   * Change fields of one annotation (colour, width, geometry...).
+   * Records one undo step.
+   */
+  const updateAnnotation = useCallback(
+    (id, patch, targetPage) => {
+      const pageNum = targetPage || currentPage;
+
+      pushHistory();
+
+      setPages(prev => {
+        const pageData = prev[pageNum];
+        if (!pageData) return prev;
+
+        return {
+          ...prev,
+          [pageNum]: {
+            ...pageData,
+            annotations: pageData.annotations.map(a =>
+              a.id === id ? { ...a, ...patch } : a
+            )
+          }
+        };
+      });
+    },
+    [currentPage, pushHistory]
+  );
+
+  const removeAnnotation = useCallback(
+    (id, targetPage) => {
+      const pageNum = targetPage || currentPage;
+
+      pushHistory();
+
+      setPages(prev => {
+        const pageData = prev[pageNum];
+        if (!pageData) return prev;
+
+        return {
+          ...prev,
+          [pageNum]: {
+            ...pageData,
+            annotations: pageData.annotations.filter(a => a.id !== id)
           }
         };
       });
@@ -498,8 +617,33 @@ export function StoreProvider({ children }) {
 
   const clearCurrentPage =
     useCallback((targetPage) => {
+      /*
+       * Only accept a real page number. The trash button used to pass the
+       * click event here, which made the page key "[object Object]" so the
+       * visible page was never cleared.
+       */
+      const pageNum =
+        typeof targetPage === 'number' &&
+        Number.isFinite(targetPage)
+          ? targetPage
+          : currentPage;
+
+      const existing =
+        pagesRef.current[pageNum];
+
+      const isAlreadyEmpty =
+        !existing ||
+        (
+          (existing.annotations || []).length === 0 &&
+          (existing.geometryObjects || []).length === 0
+        );
+
+      if (isAlreadyEmpty) {
+        setSelectedObjectId(null);
+        return;
+      }
+
       pushHistory();
-      const pageNum = targetPage || currentPage;
 
       setPages(prev => ({
         ...prev,
@@ -519,6 +663,11 @@ export function StoreProvider({ children }) {
   const selectTool = useCallback(
     toolId => {
       setActiveTool(toolId);
+
+      // Ink selection only lives inside the Edit Shapes tool
+      if (toolId !== 'shapeEdit') {
+        setSelectedInk(null);
+      }
 
       if (
         [
@@ -664,7 +813,7 @@ export function StoreProvider({ children }) {
 
   const addBlankPage =
     useCallback(() => {
-      pushHistory();
+      pushDocHistory();
 
       const newPageNum =
         totalPages + 1;
@@ -684,7 +833,124 @@ export function StoreProvider({ children }) {
       setCurrentPage(
         newPageNum
       );
-    }, [totalPages, pushHistory]);
+    }, [totalPages, pushDocHistory]);
+
+  // =========================================================
+  // DELETE PAGE
+  // =========================================================
+
+  /*
+   * Delete a page (default: the current one).
+   *  - blank workspace: later pages move up by one
+   *  - imported PDF: the page is also removed from the PDF itself
+   * One undo step brings the page back with everything on it.
+   */
+  const deletePage = useCallback(
+    async targetPage => {
+      const doc = docRef.current;
+
+      const pageNum =
+        typeof targetPage === 'number' &&
+        Number.isFinite(targetPage)
+          ? targetPage
+          : doc.currentPage;
+
+      if (doc.totalPages <= 1) {
+        return {
+          success: false,
+          error: 'A document needs at least one page.'
+        };
+      }
+
+      if (pageNum < 1 || pageNum > doc.totalPages) {
+        return {
+          success: false,
+          error: 'That page does not exist.'
+        };
+      }
+
+      let nextPdfDoc = doc.pdfDoc;
+      let nextPdfBuffer = doc.pdfArrayBuffer;
+
+      // Imported PDF: remove the page from the PDF file as well
+      const pdfPageCount = doc.pdfDoc ? doc.pdfDoc.numPages : 0;
+
+      if (doc.pdfDoc && doc.pdfArrayBuffer && pageNum <= pdfPageCount) {
+        setIsLoading(true);
+        setStatusMessage('Deleting page...');
+
+        try {
+          const newBuffer = await removePdfPage(
+            doc.pdfArrayBuffer,
+            pageNum
+          );
+
+          const loaded = await loadPdfDocument(
+            newBuffer,
+            pdfFileName
+          );
+
+          if (!loaded.success) {
+            throw new Error(loaded.error || 'Could not reload the PDF.');
+          }
+
+          nextPdfDoc = loaded.pdfDoc;
+          nextPdfBuffer = loaded.arrayBuffer;
+        } catch (err) {
+          setIsLoading(false);
+          setStatusMessage(null);
+
+          return {
+            success: false,
+            error: err.message || 'Could not delete this page.'
+          };
+        }
+
+        setIsLoading(false);
+      }
+
+      // One undo step for the whole operation
+      pushDocHistory();
+
+      // Pages after the deleted one move up by one
+      setPages(prev => {
+        const next = {};
+
+        for (let i = 1; i <= doc.totalPages; i++) {
+          if (i === pageNum) continue;
+
+          const source = prev[i] || {
+            annotations: [],
+            geometryObjects: []
+          };
+
+          next[i < pageNum ? i : i - 1] = source;
+        }
+
+        return next;
+      });
+
+      setPdfDoc(nextPdfDoc);
+      setPdfArrayBuffer(nextPdfBuffer);
+
+      const newTotal = doc.totalPages - 1;
+
+      setTotalPages(newTotal);
+      setCurrentPage(Math.min(pageNum, newTotal));
+
+      setSelectedObjectId(null);
+      setSelectedInk(null);
+
+      setStatusMessage(`Deleted page ${pageNum}`);
+
+      setTimeout(() => {
+        setStatusMessage(null);
+      }, 2500);
+
+      return { success: true, newTotal };
+    },
+    [pdfFileName, pushDocHistory]
+  );
 
   // =========================================================
   // ZOOM
@@ -997,7 +1263,9 @@ export function StoreProvider({ children }) {
           pagesData: pages,
           totalPages,
           defaultDimensions:
-            pageDimensions
+            pageDimensions,
+          gridType,
+          theme
         });
 
       setIsLoading(false);
@@ -1019,7 +1287,9 @@ export function StoreProvider({ children }) {
       pdfArrayBuffer,
       pages,
       totalPages,
-      pageDimensions
+      pageDimensions,
+      gridType,
+      theme
     ]);
 
   // =========================================================
@@ -1052,6 +1322,7 @@ export function StoreProvider({ children }) {
         nextPage,
         prevPage,
         addBlankPage,
+        deletePage,
 
         // Tools
         activeTool,
@@ -1059,6 +1330,9 @@ export function StoreProvider({ children }) {
 
         selectedObjectId,
         setSelectedObjectId,
+
+        selectedInk,
+        setSelectedInk,
 
         strokeColor,
         setStrokeColor,
@@ -1083,6 +1357,8 @@ export function StoreProvider({ children }) {
 
         // Actions
         addAnnotation,
+        updateAnnotation,
+        removeAnnotation,
         setPageAnnotations,
 
         addGeometryObject,

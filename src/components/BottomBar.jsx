@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../state/StoreContext';
 import {
   IconPrev,
@@ -17,6 +17,7 @@ export default function BottomBar() {
     nextPage,
     prevPage,
     addBlankPage,
+    deletePage,
     zoom,
     setZoom,
     zoomIn,
@@ -30,6 +31,48 @@ export default function BottomBar() {
   } = useStore();
 
   const zoomPercent = Math.round(zoom * 100);
+
+  // Two-step delete: the first tap asks, the second tap confirms
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  // Ask again when the page changes, and stop asking after a few seconds
+  useEffect(() => {
+    setConfirmDelete(false);
+  }, [currentPage]);
+
+  useEffect(() => {
+    if (!confirmDelete) return undefined;
+    const timer = setTimeout(() => setConfirmDelete(false), 5000);
+    return () => clearTimeout(timer);
+  }, [confirmDelete]);
+
+  useEffect(() => {
+    if (!deleteError) return undefined;
+    const timer = setTimeout(() => setDeleteError(null), 4000);
+    return () => clearTimeout(timer);
+  }, [deleteError]);
+
+  const handleDeletePage = async () => {
+    const pageToDelete = currentPage;
+    const remaining = totalPages - 1;
+
+    setConfirmDelete(false);
+
+    const result = await deletePage(pageToDelete);
+
+    if (!result.success) {
+      setDeleteError(result.error);
+      return;
+    }
+
+    setTimeout(() => {
+      const el = document.getElementById(
+        `page-stage-${Math.min(pageToDelete, remaining)}`
+      );
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  };
 
   const zoomPresets = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
@@ -109,6 +152,73 @@ export default function BottomBar() {
         >
           <span>+ Page</span>
         </button>
+
+        {!confirmDelete ? (
+          <button
+            className="touch-btn tooltip-wrap"
+            onClick={() => setConfirmDelete(true)}
+            disabled={totalPages <= 1}
+            data-tooltip={
+              totalPages <= 1
+                ? 'A document needs at least one page'
+                : `Delete page ${currentPage}`
+            }
+            aria-label={`Delete page ${currentPage}`}
+            style={{
+              fontSize: '11px',
+              color: totalPages <= 1 ? 'var(--text-muted)' : '#dc2626',
+              gap: '4px'
+            }}
+          >
+            <span>&minus; Page</span>
+          </button>
+        ) : (
+          <div
+            role="alertdialog"
+            aria-label={`Confirm deleting page ${currentPage}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '3px 6px 3px 10px',
+              borderRadius: '8px',
+              border: '1px solid #dc2626',
+              background: 'rgba(220, 38, 38, 0.08)',
+              fontSize: '12px',
+              color: 'var(--text-primary)'
+            }}
+          >
+            <span>Delete page {currentPage}?</span>
+
+            <button
+              className="touch-btn"
+              onClick={handleDeletePage}
+              style={{
+                background: '#dc2626',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: 600,
+                padding: '4px 10px'
+              }}
+            >
+              Delete
+            </button>
+
+            <button
+              className="touch-btn"
+              onClick={() => setConfirmDelete(false)}
+              style={{ fontSize: '12px', padding: '4px 10px' }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {deleteError && (
+          <span style={{ fontSize: '11px', color: '#dc2626' }}>
+            {deleteError}
+          </span>
+        )}
       </div>
 
       {/* Center: Live Mathematical Coordinates & Angle Snapping Status */}

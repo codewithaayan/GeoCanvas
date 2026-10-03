@@ -39,10 +39,16 @@
     Georgia,
     serif;
 
+  /* Plain-zero font for all numbers (no dot or slash inside the 0).
+     JetBrains Mono / Consolas draw a dotted or slashed zero that looks like
+     an 8 from a distance, so numbers use Inter instead. */
   --font-mono:
-    'JetBrains Mono',
-    Consolas,
-    monospace;
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Arial,
+    sans-serif;
 
   --font-sans:
     'Inter',
@@ -111,6 +117,8 @@ body {
   font-family: var(--font-sans);
   background: var(--bg-app);
   color: var(--text-primary);
+  /* equal-width digits so coordinates and page numbers do not jitter */
+  font-variant-numeric: tabular-nums;
 }
 
 body {
@@ -871,9 +879,17 @@ textarea {
     linear-gradient(to top, rgba(37, 99, 235, 0.4) 2px, transparent 2px);
 }
 
+.grid-none {
+  background-image: none;
+}
+
 .grid-millimeter {
+  /* order matches the 4 gradients below:
+     minor-x, minor-y, major-x, major-y */
   background-size:
     20px 20px,
+    20px 20px,
+    100px 100px,
     100px 100px;
 
   background-image:
@@ -1449,7 +1465,7 @@ textarea {
 
   color: #38bdf8;
 
-  font-family: monospace;
+  font-family: var(--font-mono);
 
   font-size: 10px;
   font-weight: 700;
@@ -1632,7 +1648,7 @@ textarea {
 
   color: #38bdf8;
 
-  font-family: monospace;
+  font-family: var(--font-mono);
 
   font-size: 10px;
 }
@@ -1921,7 +1937,7 @@ textarea {
 
   color: #4f657c;
 
-  font-family: monospace;
+  font-family: var(--font-mono);
 
   font-size: 9px;
 

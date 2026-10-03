@@ -21,6 +21,30 @@ import {
   IconAngle
 } from '../assets/math-icons';
 
+// Edit tool icon: dashed frame with corner handles
+function IconShapeEdit({ size = 21 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="5" y="7" width="14" height="12" strokeDasharray="2.5 2" />
+      <rect x="3.2" y="5.2" width="3.6" height="3.6" fill="currentColor" />
+      <rect x="17.2" y="5.2" width="3.6" height="3.6" fill="currentColor" />
+      <rect x="3.2" y="17.2" width="3.6" height="3.6" fill="currentColor" />
+      <rect x="17.2" y="17.2" width="3.6" height="3.6" fill="currentColor" />
+      <circle cx="12" cy="2.6" r="1.4" />
+      <path d="M12 4v3" />
+    </svg>
+  );
+}
+
 export default function LeftToolbar() {
   const {
     activeTool,
@@ -45,8 +69,13 @@ export default function LeftToolbar() {
     },
     {
       id: 'magicPen',
-      name: 'Magic Pen (Auto-Correct Shapes)',
+      name: 'Smart Pen (draw naturally, shapes snap clean)',
       icon: IconMagicPen
+    },
+    {
+      id: 'shapeEdit',
+      name: 'Edit Shapes & Ink (move, resize, rotate, recolor)',
+      icon: IconShapeEdit
     },
     {
       id: 'laser',

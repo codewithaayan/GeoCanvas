@@ -200,7 +200,7 @@ export default function TopBar({
 
           <button
             className="header-icon-btn danger"
-            onClick={clearCurrentPage}
+            onClick={() => clearCurrentPage()}
             title="Clear page"
           >
             <IconTrash size={18} />
@@ -766,4 +766,3 @@ export default function TopBar({
     </>
   );
 }
-

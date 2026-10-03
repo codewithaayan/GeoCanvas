@@ -10,7 +10,16 @@ import { useStore } from '../state/StoreContext';
 import { PenTool } from '../tools/PenTool';
 import { EraserTool } from '../tools/EraserTool';
 import { TextTool } from '../tools/TextTool';
-import { MagicPenTool } from '../tools/MagicPenTool';
+
+import {
+  SmartPenController,
+  SmartPenInput,
+  StrokeManager,
+  ShapeRenderer
+} from '../smartpen';
+
+import { bounds as pointBounds } from '../smartpen/geometrymath';
+
 import { LaserTool } from '../tools/LaserTool';
 
 const ANNOTATION_TOOLS = [
@@ -19,8 +28,45 @@ const ANNOTATION_TOOLS = [
   'laser',
   'highlighter',
   'eraser',
-  'text'
+  'text',
+  'shapeEdit'
 ];
+
+// Tools that draw with a pen / finger
+const PEN_LIKE_TOOLS = [
+  'pen',
+  'magicPen',
+  'highlighter'
+];
+
+const chipButtonStyle = {
+  border: 'none',
+  borderRadius: '999px',
+  padding: '5px 12px',
+  minHeight: '30px',
+  fontSize: '12px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  background: 'rgba(255,255,255,0.16)',
+  color: '#ffffff'
+};
+
+// Remove bookkeeping fields before storing a stroke.
+const cleanStroke = raw => {
+  const {
+    pointerType: _pointerType,
+    ...rest
+  } = raw;
+
+  return {
+    ...rest,
+    points: raw.points.map(p => ({
+      x: p.x,
+      y: p.y,
+      pressure: p.pressure ?? 0.5
+    }))
+  };
+};
 
 export default function AnnotationLayer({
   width,
@@ -48,22 +94,122 @@ export default function AnnotationLayer({
     setPageAnnotations,
 
     pushHistory,
-    setLiveCoords
+    setLiveCoords,
+
+    selectedInk,
+    setSelectedInk,
+    removeAnnotation,
+    selectTool
   } = useStore();
 
-  const targetPageNum = pageNum || currentPage;
-  const pageAnnotations = (pages && pages[targetPageNum]?.annotations) || currentPageData?.annotations || [];
+  const targetPageNum =
+    pageNum || currentPage;
+
+  const pageAnnotations =
+    (pages &&
+      pages[targetPageNum]?.annotations) ||
+    currentPageData?.annotations ||
+    [];
+
+  // =========================================================
+  // REFS
+  // =========================================================
 
   const canvasRef = useRef(null);
-  const activeStrokeRef = useRef(null);
-  const annotationsRef = useRef([]);
-  const animationFrameRef = useRef(null);
-  const activeTouchesRef = useRef(new Map());
 
-  const laserTrailRef = useRef(null);
-  const laserAnimIdRef = useRef(null);
+  const activeStrokeRef =
+    useRef(null);
 
-  const eraseHistoryCapturedRef = useRef(false);
+  const annotationsRef =
+    useRef([]);
+
+  const animationFrameRef =
+    useRef(null);
+
+  const activeTouchesRef =
+    useRef(new Map());
+
+  // IMPORTANT:
+  // React state updates are asynchronous.
+  // This ref gives pointer events an immediate drawing state.
+  const isDrawingRef =
+    useRef(false);
+
+  // Laser
+  const laserStrokesRef =
+    useRef([]);
+
+  const laserAnimIdRef =
+    useRef(null);
+
+  const activeLaserRef =
+    useRef(null);
+
+  // Renderer
+  const renderRef =
+    useRef(null);
+
+  // Eraser
+  const lastEraserPointRef =
+    useRef(null);
+
+  const eraseHistoryCapturedRef =
+    useRef(false);
+
+  // Smart Pen
+  const controllerRef =
+    useRef(null);
+
+  if (!controllerRef.current) {
+    controllerRef.current =
+      new SmartPenController();
+  }
+
+  const inputRef =
+    useRef(null);
+
+  if (!inputRef.current) {
+    inputRef.current =
+      new SmartPenInput();
+  }
+
+  const strokeManagerRef =
+    useRef(null);
+
+  if (!strokeManagerRef.current) {
+    strokeManagerRef.current =
+      new StrokeManager();
+  }
+
+  const morphRef =
+    useRef(null);
+
+  const morphAnimRef =
+    useRef(null);
+
+  const previewRef =
+    useRef(null);
+
+  const smartResultRef =
+    useRef(null);
+
+  const noticeTimerRef =
+    useRef(null);
+
+  // Shape editing
+  const editRef =
+    useRef(null);
+
+  // Latest render-only values
+  const liveRef =
+    useRef({});
+
+  // =========================================================
+  // STATE
+  // =========================================================
+
+  const [smartNotice, setSmartNotice] =
+    useState(null);
 
   const [isDrawing, setIsDrawing] =
     useState(false);
@@ -74,21 +220,69 @@ export default function AnnotationLayer({
   const [cursorPoint, setCursorPoint] =
     useState(null);
 
-  const textInputRef = useRef(null);
+  const textInputRef =
+    useRef(null);
+
+  // =========================================================
+  // TOOL STATE
+  // =========================================================
 
   const isInteractive =
     ANNOTATION_TOOLS.includes(activeTool);
 
+  const laserWidth =
+    Math.max(
+      2.5,
+      strokeWidth || 3
+    );
+
+  const trackCursor =
+    activeTool === 'eraser' ||
+    activeTool === 'laser';
+
+  // Keep latest render values in a ref.
+  liveRef.current = {
+    zoom,
+    activeTool,
+    cursorPoint,
+    eraserSize,
+    strokeColor,
+    laserWidth,
+    selectedInk,
+    targetPageNum
+  };
+
   // =========================================================
-  // KEEP LOCAL ANNOTATION REFERENCE UPDATED
+  // LOCAL ANNOTATIONS
   // =========================================================
 
   useEffect(() => {
-    annotationsRef.current = pageAnnotations;
+    annotationsRef.current =
+      pageAnnotations;
 
-    // Redraw whenever page annotations change.
+    // Smart Pen result was removed/undone.
+    if (
+      smartResultRef.current &&
+      !pageAnnotations.some(
+        a =>
+          a.id ===
+          smartResultRef.current.id
+      )
+    ) {
+      clearTimeout(
+        noticeTimerRef.current
+      );
+
+      previewRef.current = null;
+      smartResultRef.current = null;
+
+      setSmartNotice(null);
+    }
+
     requestAnimationFrame(() => {
-      renderCanvas();
+      if (renderRef.current) {
+        renderRef.current();
+      }
     });
   }, [pageAnnotations]);
 
@@ -96,174 +290,315 @@ export default function AnnotationLayer({
   // DOCUMENT COORDINATES
   // =========================================================
 
-  const getDocCoordinates = useCallback(
-    e => {
-      const canvas = canvasRef.current;
+  const getDocCoordinates =
+    useCallback(
+      e => {
+        const canvas =
+          canvasRef.current;
 
-      if (!canvas) {
+        if (!canvas) {
+          return {
+            x: 0,
+            y: 0,
+            pressure: 0.5
+          };
+        }
+
+        const rect =
+          canvas.getBoundingClientRect();
+
+        if (
+          rect.width <= 0 ||
+          rect.height <= 0
+        ) {
+          return {
+            x: 0,
+            y: 0,
+            pressure: 0.5
+          };
+        }
+
         return {
-          x: 0,
-          y: 0,
-          pressure: 0.5
+          x: Math.max(
+            0,
+            Math.min(
+              width,
+              (e.clientX -
+                rect.left) /
+                zoom
+            )
+          ),
+
+          y: Math.max(
+            0,
+            Math.min(
+              height,
+              (e.clientY -
+                rect.top) /
+                zoom
+            )
+          ),
+
+          pressure:
+            e.pressure &&
+            e.pressure > 0
+              ? e.pressure
+              : 0.5
         };
-      }
-
-      const rect =
-        canvas.getBoundingClientRect();
-
-      if (
-        rect.width <= 0 ||
-        rect.height <= 0
-      ) {
-        return {
-          x: 0,
-          y: 0,
-          pressure: 0.5
-        };
-      }
-
-      return {
-        x: Math.max(
-          0,
-          Math.min(
-            width,
-            (e.clientX - rect.left) /
-              zoom
-          )
-        ),
-
-        y: Math.max(
-          0,
-          Math.min(
-            height,
-            (e.clientY - rect.top) /
-              zoom
-          )
-        ),
-
-        pressure:
-          e.pressure && e.pressure > 0
-            ? e.pressure
-            : 0.5
-      };
-    },
-    [width, height, zoom]
-  );
+      },
+      [
+        width,
+        height,
+        zoom
+      ]
+    );
 
   // =========================================================
   // DRAW CANVAS
   // =========================================================
 
-  const renderCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
+  const renderCanvas =
+    useCallback(() => {
+      const canvas =
+        canvasRef.current;
 
-    if (!canvas) return;
+      if (!canvas) return;
 
-    const ctx =
-      canvas.getContext('2d');
+      const ctx =
+        canvas.getContext('2d');
 
-    if (!ctx) return;
+      if (!ctx) return;
 
-    const dpr =
-      window.devicePixelRatio || 1;
+      const L =
+        liveRef.current;
 
-    ctx.clearRect(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
+      const controller =
+        controllerRef.current;
 
-    /*
-     * The canvas backing resolution is:
-     *
-     * width  = documentWidth  * zoom * dpr
-     * height = documentHeight * zoom * dpr
-     *
-     * Therefore drawing is scaled by zoom here.
-     */
-    ctx.save();
+      const dpr =
+        window.devicePixelRatio ||
+        1;
 
-    ctx.scale(
-      zoom * dpr,
-      zoom * dpr
-    );
+      // ALWAYS reset transform.
+      // Prevents transforms from accumulating.
+      ctx.setTransform(
+        1,
+        0,
+        0,
+        1,
+        0,
+        0
+      );
 
-    const annotations =
-      annotationsRef.current || [];
+      ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
 
-    // -------------------------------------------------------
-    // STORED ANNOTATIONS
-    // -------------------------------------------------------
+      ctx.save();
 
-    for (const ann of annotations) {
+      ctx.scale(
+        L.zoom * dpr,
+        L.zoom * dpr
+      );
+
+      const annotations =
+        annotationsRef.current ||
+        [];
+
+      const morph =
+        morphRef.current;
+
+      // =====================================================
+      // STORED ANNOTATIONS
+      // =====================================================
+
+      for (
+        const ann of annotations
+      ) {
+        // Morph is drawn separately.
+        if (
+          morph &&
+          ann.id === morph.id
+        ) {
+          continue;
+        }
+
+        if (
+          ann.type === 'pen' ||
+          ann.type === 'highlighter'
+        ) {
+          PenTool.drawStroke(
+            ctx,
+            ann
+          );
+        }
+
+        if (
+          ann.type === 'text'
+        ) {
+          TextTool.drawText(
+            ctx,
+            ann,
+            false
+          );
+        }
+      }
+
+      // =====================================================
+      // SMART PEN MORPH
+      // =====================================================
+
+      if (morph) {
+        const t =
+          controller.morphProgress(
+            morph,
+            performance.now()
+          );
+
+        ShapeRenderer.drawMorph(
+          ctx,
+          morph.style,
+          ShapeRenderer.morphFrame(
+            morph,
+            t
+          ),
+          t
+        );
+      }
+
+      // =====================================================
+      // SMART PEN PREVIEW
+      // =====================================================
+
       if (
-        ann.type === 'pen' ||
-        ann.type === 'highlighter'
+        previewRef.current
+      ) {
+        const p =
+          previewRef.current;
+
+        ShapeRenderer.drawPreview(
+          ctx,
+          p.style,
+          p.corrected.points,
+          L.zoom
+        );
+      }
+
+      // =====================================================
+      // LIVE STROKE
+      // =====================================================
+
+      if (
+        activeStrokeRef.current
       ) {
         PenTool.drawStroke(
           ctx,
-          ann
+          activeStrokeRef.current
         );
       }
 
-      if (ann.type === 'text') {
-        TextTool.drawText(
+      // =====================================================
+      // SHAPE SELECTION
+      // =====================================================
+
+      if (
+        L.activeTool ===
+          'shapeEdit' &&
+        L.selectedInk &&
+        L.selectedInk.pageNum ===
+          L.targetPageNum
+      ) {
+        const selected =
+          annotations.find(
+            a =>
+              a.id ===
+              L.selectedInk.id
+          );
+
+        if (
+          selected &&
+          selected.points &&
+          selected.points.length > 0
+        ) {
+          ShapeRenderer.drawSelection(
+            ctx,
+            controller.frameFor(
+              selected,
+              L.zoom
+            ),
+            L.zoom
+          );
+        }
+      }
+
+      // =====================================================
+      // LASER
+      // =====================================================
+
+      if (
+        L.activeTool ===
+        'laser'
+      ) {
+        LaserTool.draw(
           ctx,
-          ann,
-          false
+          laserStrokesRef.current,
+          L.cursorPoint
+            ? {
+                x:
+                  L.cursorPoint.x,
+                y:
+                  L.cursorPoint.y,
+                color:
+                  L.strokeColor ||
+                  '#ef4444',
+                width:
+                  L.laserWidth
+              }
+            : null
         );
       }
-    }
 
-    // -------------------------------------------------------
-    // LIVE STROKE
-    // -------------------------------------------------------
+      // =====================================================
+      // ERASER CURSOR
+      // =====================================================
 
-    if (activeStrokeRef.current) {
-      PenTool.drawStroke(
-        ctx,
-        activeStrokeRef.current
-      );
-    }
+      if (
+        L.activeTool ===
+          'eraser' &&
+        L.cursorPoint
+      ) {
+        EraserTool.drawCursor(
+          ctx,
+          L.cursorPoint,
+          L.eraserSize
+        );
+      }
 
-    // -------------------------------------------------------
-    // LASER TRAIL (GOODNOTES STYLE)
-    // -------------------------------------------------------
+      ctx.restore();
+    }, []);
 
-    if (laserTrailRef.current) {
-      LaserTool.draw(
-        ctx,
-        laserTrailRef.current,
-        cursorPoint
-      );
-    }
-
-    // -------------------------------------------------------
-    // ERASER CURSOR
-    // -------------------------------------------------------
-
-    if (
-      activeTool === 'eraser' &&
-      cursorPoint
-    ) {
-      EraserTool.drawCursor(
-        ctx,
-        cursorPoint,
-        eraserSize
-      );
-    }
-
-    ctx.restore();
-  }, [
-    zoom,
-    activeTool,
-    cursorPoint,
-    eraserSize
-  ]);
+  // Keep newest renderer available.
+  renderRef.current =
+    renderCanvas;
 
   // =========================================================
-  // SCHEDULE RENDER
+  // IMMEDIATE RENDER
+  // =========================================================
+
+  const renderNow =
+    useCallback(() => {
+      if (
+        renderRef.current
+      ) {
+        renderRef.current();
+      }
+    }, []);
+
+  // =========================================================
+  // SCHEDULED RENDER
   // =========================================================
 
   const scheduleRender =
@@ -279,9 +614,29 @@ export default function AnnotationLayer({
           animationFrameRef.current =
             null;
 
-          renderCanvas();
+          if (
+            renderRef.current
+          ) {
+            renderRef.current();
+          }
         });
-    }, [renderCanvas]);
+    }, []);
+
+  // =========================================================
+  // RENDER-ONLY STATE CHANGES
+  // =========================================================
+
+  useEffect(() => {
+    scheduleRender();
+  }, [
+    activeTool,
+    cursorPoint,
+    eraserSize,
+    strokeColor,
+    laserWidth,
+    selectedInk,
+    scheduleRender
+  ]);
 
   // =========================================================
   // CANVAS SIZE
@@ -294,21 +649,28 @@ export default function AnnotationLayer({
     if (!canvas) return;
 
     const dpr =
-      window.devicePixelRatio || 1;
+      window.devicePixelRatio ||
+      1;
 
-    canvas.width = Math.max(
-      1,
-      Math.floor(
-        width * zoom * dpr
-      )
-    );
+    canvas.width =
+      Math.max(
+        1,
+        Math.floor(
+          width *
+            zoom *
+            dpr
+        )
+      );
 
-    canvas.height = Math.max(
-      1,
-      Math.floor(
-        height * zoom * dpr
-      )
-    );
+    canvas.height =
+      Math.max(
+        1,
+        Math.floor(
+          height *
+            zoom *
+            dpr
+        )
+      );
 
     canvas.style.width =
       `${width * zoom}px`;
@@ -316,12 +678,12 @@ export default function AnnotationLayer({
     canvas.style.height =
       `${height * zoom}px`;
 
-    renderCanvas();
+    renderNow();
   }, [
     width,
     height,
     zoom,
-    renderCanvas
+    renderNow
   ]);
 
   // =========================================================
@@ -337,6 +699,26 @@ export default function AnnotationLayer({
           animationFrameRef.current
         );
       }
+
+      if (
+        laserAnimIdRef.current
+      ) {
+        cancelAnimationFrame(
+          laserAnimIdRef.current
+        );
+      }
+
+      if (
+        morphAnimRef.current
+      ) {
+        cancelAnimationFrame(
+          morphAnimRef.current
+        );
+      }
+
+      clearTimeout(
+        noticeTimerRef.current
+      );
     };
   }, []);
 
@@ -344,60 +726,92 @@ export default function AnnotationLayer({
   // ERASER
   // =========================================================
 
-  const eraseAtPoint =
+  const eraseAlong =
     useCallback(
-      point => {
-        const annotations =
-          annotationsRef.current || [];
+      (from, to) => {
+        let annotations =
+          annotationsRef.current ||
+          [];
 
         if (
-          annotations.length === 0
+          annotations.length ===
+          0
         ) {
           return;
         }
 
-        const result =
-          EraserTool.eraseStrokes(
-            annotations,
-            point,
-            eraserSize
+        const start =
+          from || to;
+
+        const step =
+          Math.max(
+            2,
+            eraserSize * 0.5
           );
 
-        if (!result) {
+        const distanceMoved =
+          Math.hypot(
+            to.x - start.x,
+            to.y - start.y
+          );
+
+        const steps =
+          Math.max(
+            1,
+            Math.ceil(
+              distanceMoved /
+                step
+            )
+          );
+
+        let changedAny =
+          false;
+
+        for (
+          let i = 1;
+          i <= steps;
+          i++
+        ) {
+          const t =
+            i / steps;
+
+          const point = {
+            x:
+              start.x +
+              (to.x -
+                start.x) *
+                t,
+
+            y:
+              start.y +
+              (to.y -
+                start.y) *
+                t
+          };
+
+          const result =
+            EraserTool.eraseStrokes(
+              annotations,
+              point,
+              eraserSize
+            );
+
+          if (
+            result &&
+            result.changed
+          ) {
+            annotations =
+              result.updatedAnnotations;
+
+            changedAny =
+              true;
+          }
+        }
+
+        if (!changedAny) {
           return;
         }
 
-        const updated =
-          Array.isArray(
-            result.updatedAnnotations
-          )
-            ? result.updatedAnnotations
-            : annotations;
-
-        const deleted =
-          Array.isArray(
-            result.deletedAnnotations
-          )
-            ? result.deletedAnnotations
-            : [];
-
-        /*
-         * Detect both:
-         *
-         * 1. Whole annotation deletion
-         * 2. Partial stroke modification
-         */
-        const changed =
-          deleted.length > 0 ||
-          updated.length !==
-            annotations.length;
-
-        if (!changed) {
-          return;
-        }
-
-        // Only create one history snapshot
-        // for one continuous erase gesture.
         if (
           !eraseHistoryCapturedRef.current
         ) {
@@ -408,389 +822,1399 @@ export default function AnnotationLayer({
         }
 
         annotationsRef.current =
-          updated;
+          annotations;
 
         setPageAnnotations(
-          updated,
+          annotations,
           targetPageNum
         );
 
-        scheduleRender();
+        // Paint immediately.
+        renderNow();
       },
       [
         eraserSize,
         pushHistory,
         setPageAnnotations,
-        scheduleRender,
-        targetPageNum
+        targetPageNum,
+        renderNow
       ]
     );
 
   // =========================================================
-  // LASER LOOP
+  // LASER
   // =========================================================
 
-  const startLaserLoop = useCallback(() => {
-    if (laserAnimIdRef.current) return;
-    const loop = () => {
-      const active = laserTrailRef.current && LaserTool.update(laserTrailRef.current);
+  const stopLaser =
+    useCallback(() => {
+      if (
+        laserAnimIdRef.current
+      ) {
+        cancelAnimationFrame(
+          laserAnimIdRef.current
+        );
+
+        laserAnimIdRef.current =
+          null;
+      }
+
+      laserStrokesRef.current =
+        [];
+
+      activeLaserRef.current =
+        null;
+
+      renderNow();
+    }, [renderNow]);
+
+  const startLaserLoop =
+    useCallback(() => {
+      if (
+        laserAnimIdRef.current
+      ) {
+        return;
+      }
+
+      const loop = () => {
+        laserStrokesRef.current =
+          LaserTool.prune(
+            laserStrokesRef.current
+          );
+
+        renderNow();
+
+        if (
+          laserStrokesRef.current
+            .length > 0
+        ) {
+          laserAnimIdRef.current =
+            requestAnimationFrame(
+              loop
+            );
+        } else {
+          laserAnimIdRef.current =
+            null;
+        }
+      };
+
+      laserAnimIdRef.current =
+        requestAnimationFrame(
+          loop
+        );
+    }, [renderNow]);
+
+  useEffect(() => {
+    if (
+      activeTool !==
+      'laser'
+    ) {
+      stopLaser();
+    }
+  }, [
+    activeTool,
+    stopLaser
+  ]);
+
+  // =========================================================
+  // SMART PEN
+  // =========================================================
+
+  const dismissSmartNotice =
+    useCallback(() => {
+      clearTimeout(
+        noticeTimerRef.current
+      );
+
+      previewRef.current =
+        null;
+
+      smartResultRef.current =
+        null;
+
+      setSmartNotice(null);
+
       scheduleRender();
-      if (active) {
-        laserAnimIdRef.current = requestAnimationFrame(loop);
-      } else {
-        laserTrailRef.current = null;
-        laserAnimIdRef.current = null;
-        scheduleRender();
+    }, [scheduleRender]);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(
+        noticeTimerRef.current
+      );
+
+      if (
+        morphAnimRef.current
+      ) {
+        cancelAnimationFrame(
+          morphAnimRef.current
+        );
       }
     };
-    laserAnimIdRef.current = requestAnimationFrame(loop);
-  }, [scheduleRender]);
+  }, []);
+
+  useEffect(() => {
+    if (
+      activeTool !==
+      'magicPen'
+    ) {
+      dismissSmartNotice();
+    }
+  }, [
+    activeTool,
+    dismissSmartNotice
+  ]);
+
+  // =========================================================
+  // SMART PEN MORPH
+  // =========================================================
+
+  const startMorph =
+    (rawStroke, corrected) => {
+      const controller =
+        controllerRef.current;
+
+      morphRef.current =
+        controller.createMorph(
+          rawStroke,
+          corrected,
+          performance.now()
+        );
+
+      if (
+        morphAnimRef.current
+      ) {
+        cancelAnimationFrame(
+          morphAnimRef.current
+        );
+      }
+
+      const loop = () => {
+        const morph =
+          morphRef.current;
+
+        if (!morph) {
+          morphAnimRef.current =
+            null;
+
+          return;
+        }
+
+        const t =
+          controller.morphProgress(
+            morph,
+            performance.now()
+          );
+
+        if (t >= 1) {
+          morphRef.current =
+            null;
+
+          morphAnimRef.current =
+            null;
+
+          renderNow();
+
+          return;
+        }
+
+        renderNow();
+
+        morphAnimRef.current =
+          requestAnimationFrame(
+            loop
+          );
+      };
+
+      morphAnimRef.current =
+        requestAnimationFrame(
+          loop
+        );
+    };
+
+  const showSmartNotice =
+    (result, ttl) => {
+      const b =
+        pointBounds(
+          result.corrected.points
+        );
+
+      const x =
+        Math.max(
+          8,
+          Math.min(
+            b.minX * zoom,
+            Math.max(
+              8,
+              width * zoom -
+                330
+            )
+          )
+        );
+
+      let y =
+        b.minY * zoom -
+        46;
+
+      if (y < 8) {
+        y =
+          b.maxY * zoom +
+          12;
+      }
+
+      clearTimeout(
+        noticeTimerRef.current
+      );
+
+      setSmartNotice({
+        id:
+          result.corrected.id,
+
+        mode:
+          result.mode,
+
+        label:
+          result.label,
+
+        percent:
+          Math.round(
+            result.confidence *
+              100
+          ),
+
+        x,
+        y
+      });
+
+      noticeTimerRef.current =
+        setTimeout(
+          dismissSmartNotice,
+          ttl
+        );
+    };
+
+  const commitLocal =
+    list => {
+      annotationsRef.current =
+        list;
+
+      setPageAnnotations(
+        list,
+        targetPageNum
+      );
+
+      renderNow();
+    };
+
+  // =========================================================
+  // SMART PEN STROKE
+  // =========================================================
+
+  const handleSmartStroke =
+    rawStroke => {
+      const controller =
+        controllerRef.current;
+
+      const raw =
+        cleanStroke(
+          rawStroke
+        );
+
+      const result =
+        controller.analyze(
+          rawStroke,
+          {
+            unit:
+              1 / zoom
+          }
+        );
+
+      if (
+        result.mode ===
+        'auto'
+      ) {
+        smartResultRef.current =
+          {
+            id: raw.id,
+            raw,
+            corrected:
+              result.corrected
+          };
+
+        previewRef.current =
+          null;
+
+        annotationsRef.current =
+          [
+            ...annotationsRef.current,
+            result.corrected
+          ];
+
+        addAnnotation(
+          result.corrected,
+          targetPageNum
+        );
+
+        startMorph(
+          rawStroke,
+          result.corrected
+        );
+
+        showSmartNotice(
+          result,
+          5000
+        );
+
+        return;
+      }
+
+      // Keep original drawing.
+      annotationsRef.current =
+        [
+          ...annotationsRef.current,
+          raw
+        ];
+
+      addAnnotation(
+        raw,
+        targetPageNum
+      );
+
+      if (
+        result.mode ===
+        'preview'
+      ) {
+        smartResultRef.current =
+          {
+            id: raw.id,
+            raw,
+            corrected:
+              result.corrected
+          };
+
+        previewRef.current =
+          {
+            id: raw.id,
+
+            corrected:
+              result.corrected,
+
+            style: {
+              color:
+                raw.color,
+
+              width:
+                raw.width
+            }
+          };
+
+        showSmartNotice(
+          result,
+          8000
+        );
+
+        return;
+      }
+
+      smartResultRef.current =
+        null;
+    };
+
+  // =========================================================
+  // SMART PEN ACTIONS
+  // =========================================================
+
+  const undoCorrection =
+    () => {
+      const data =
+        smartResultRef.current;
+
+      if (!data) return;
+
+      if (
+        morphAnimRef.current
+      ) {
+        cancelAnimationFrame(
+          morphAnimRef.current
+        );
+
+        morphAnimRef.current =
+          null;
+      }
+
+      morphRef.current =
+        null;
+
+      commitLocal(
+        annotationsRef.current.map(
+          a =>
+            a.id === data.id
+              ? data.raw
+              : a
+        )
+      );
+
+      dismissSmartNotice();
+    };
+
+  const acceptSuggestion =
+    () => {
+      const data =
+        smartResultRef.current;
+
+      if (!data) return;
+
+      previewRef.current =
+        null;
+
+      commitLocal(
+        annotationsRef.current.map(
+          a =>
+            a.id === data.id
+              ? data.corrected
+              : a
+        )
+      );
+
+      startMorph(
+        data.raw,
+        data.corrected
+      );
+
+      clearTimeout(
+        noticeTimerRef.current
+      );
+
+      setSmartNotice(prev =>
+        prev
+          ? {
+              ...prev,
+              mode: 'auto'
+            }
+          : prev
+      );
+
+      noticeTimerRef.current =
+        setTimeout(
+          dismissSmartNotice,
+          5000
+        );
+    };
+
+  const editCorrectedShape =
+    () => {
+      const data =
+        smartResultRef.current;
+
+      if (!data) return;
+
+      dismissSmartNotice();
+
+      selectTool(
+        'shapeEdit'
+      );
+
+      setSelectedInk({
+        id: data.id,
+        pageNum:
+          targetPageNum
+      });
+    };
+
+  // =========================================================
+  // DELETE / ESCAPE SHAPE EDIT
+  // =========================================================
+
+  useEffect(() => {
+    if (
+      activeTool !==
+      'shapeEdit'
+    ) {
+      return undefined;
+    }
+
+    const onKeyDown =
+      e => {
+        if (
+          !selectedInk ||
+          selectedInk.pageNum !==
+            targetPageNum
+        ) {
+          return;
+        }
+
+        const tag =
+          (
+            e.target?.tagName ||
+            ''
+          ).toLowerCase();
+
+        if (
+          tag === 'input' ||
+          tag === 'textarea' ||
+          tag === 'select' ||
+          e.target
+            ?.isContentEditable
+        ) {
+          return;
+        }
+
+        if (
+          e.key ===
+            'Delete' ||
+          e.key ===
+            'Backspace'
+        ) {
+          e.preventDefault();
+
+          removeAnnotation(
+            selectedInk.id,
+            targetPageNum
+          );
+
+          setSelectedInk(
+            null
+          );
+        } else if (
+          e.key === 'Escape'
+        ) {
+          setSelectedInk(
+            null
+          );
+        }
+      };
+
+    window.addEventListener(
+      'keydown',
+      onKeyDown
+    );
+
+    return () =>
+      window.removeEventListener(
+        'keydown',
+        onKeyDown
+      );
+  }, [
+    activeTool,
+    selectedInk,
+    targetPageNum,
+    removeAnnotation,
+    setSelectedInk
+  ]);
 
   // =========================================================
   // POINTER DOWN
   // =========================================================
 
-  const handlePointerDown = e => {
-    if (
-      e.button !== 0 ||
-      e.altKey ||
-      !isInteractive
-    ) {
-      return;
-    }
-
-    // Touch screen handling: multi-touch palm/pinch rejection
-    if (e.pointerType === 'touch') {
-      activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (activeTouchesRef.current.size >= 2) {
-        // Multi-touch pinch detected! Cancel drawing immediately so two fingers do NOT draw lines!
-        activeStrokeRef.current = null;
-        setIsDrawing(false);
-        scheduleRender();
+  const handlePointerDown =
+    e => {
+      if (
+        e.button !== 0 ||
+        e.altKey ||
+        !isInteractive
+      ) {
         return;
       }
-    }
 
-    e.preventDefault();
+      // Palm rejection
+      if (
+        PEN_LIKE_TOOLS.includes(
+          activeTool
+        ) &&
+        !inputRef.current.accept(
+          e
+        )
+      ) {
+        return;
+      }
 
-    const point =
-      getDocCoordinates(e);
-
-    setLiveCoords(point);
-    setCursorPoint(point);
-
-    // -------------------------------------------------------
-    // PEN / MAGIC PEN / HIGHLIGHTER
-    // -------------------------------------------------------
-
-    if (
-      activeTool === 'pen' ||
-      activeTool === 'magicPen' ||
-      activeTool === 'highlighter'
-    ) {
-      try {
-        e.currentTarget.setPointerCapture(
-          e.pointerId
-        );
-      } catch {}
-
-      const isHighlighter =
-        activeTool === 'highlighter';
-
-      const stroke =
-        PenTool.createStroke(
-          point,
+      // Touch multi-finger rejection
+      if (
+        e.pointerType ===
+        'touch'
+      ) {
+        activeTouchesRef.current.set(
+          e.pointerId,
           {
-            tool: isHighlighter ? 'highlighter' : 'pen',
-
-            color: isHighlighter
-              ? highlighterColor
-              : strokeColor,
-
-            width: isHighlighter
-              ? highlighterWidth
-              : strokeWidth,
-
-            opacity: isHighlighter
-              ? highlighterOpacity
-              : 1
+            x: e.clientX,
+            y: e.clientY
           }
         );
 
-      activeStrokeRef.current =
-        stroke;
+        if (
+          activeTouchesRef.current
+            .size >= 2
+        ) {
+          activeStrokeRef.current =
+            null;
 
-      setIsDrawing(true);
+          strokeManagerRef.current.cancel();
 
-      scheduleRender();
+          editRef.current =
+            null;
 
-      return;
-    }
+          isDrawingRef.current =
+            false;
 
-    // -------------------------------------------------------
-    // LASER TOOL (GOODNOTES STYLE)
-    // -------------------------------------------------------
+          setIsDrawing(
+            false
+          );
 
-    if (activeTool === 'laser') {
-      try {
-        e.currentTarget.setPointerCapture(
-          e.pointerId
+          renderNow();
+
+          return;
+        }
+      }
+
+      e.preventDefault();
+
+      const point =
+        getDocCoordinates(e);
+
+      setLiveCoords(point);
+
+      if (trackCursor) {
+        setCursorPoint(
+          point
         );
-      } catch {}
+      }
 
-      const laser =
-        LaserTool.createLaser(
-          point,
-          {
-            color: strokeColor || '#ef4444',
-            width: strokeWidth ? strokeWidth * 2 : 6
+      // =====================================================
+      // PEN / MAGIC PEN / HIGHLIGHTER
+      // =====================================================
+
+      if (
+        activeTool ===
+          'pen' ||
+        activeTool ===
+          'magicPen' ||
+        activeTool ===
+          'highlighter'
+      ) {
+        try {
+          e.currentTarget.setPointerCapture(
+            e.pointerId
+          );
+        } catch {}
+
+        // MAGIC PEN
+        if (
+          activeTool ===
+          'magicPen'
+        ) {
+          dismissSmartNotice();
+
+          const first =
+            inputRef.current.samples(
+              e,
+              getDocCoordinates
+            )[0];
+
+          activeStrokeRef.current =
+            strokeManagerRef.current.begin(
+              first,
+              {
+                color:
+                  strokeColor,
+
+                width:
+                  strokeWidth
+              }
+            );
+
+          isDrawingRef.current =
+            true;
+
+          setIsDrawing(
+            true
+          );
+
+          renderNow();
+
+          return;
+        }
+
+        const isHighlighter =
+          activeTool ===
+          'highlighter';
+
+        const stroke =
+          PenTool.createStroke(
+            point,
+            {
+              tool:
+                isHighlighter
+                  ? 'highlighter'
+                  : 'pen',
+
+              color:
+                isHighlighter
+                  ? highlighterColor
+                  : strokeColor,
+
+              width:
+                isHighlighter
+                  ? highlighterWidth
+                  : strokeWidth,
+
+              opacity:
+                isHighlighter
+                  ? highlighterOpacity
+                  : 1
+            }
+          );
+
+        activeStrokeRef.current =
+          stroke;
+
+        isDrawingRef.current =
+          true;
+
+        setIsDrawing(
+          true
+        );
+
+        // Immediately show first point.
+        renderNow();
+
+        return;
+      }
+
+      // =====================================================
+      // SHAPE EDIT
+      // =====================================================
+
+      if (
+        activeTool ===
+        'shapeEdit'
+      ) {
+        try {
+          e.currentTarget.setPointerCapture(
+            e.pointerId
+          );
+        } catch {}
+
+        const controller =
+          controllerRef.current;
+
+        const annotations =
+          annotationsRef.current;
+
+        const selected =
+          selectedInk &&
+          selectedInk.pageNum ===
+            targetPageNum
+            ? annotations.find(
+                a =>
+                  a.id ===
+                  selectedInk.id
+              )
+            : null;
+
+        if (selected) {
+          const handle =
+            controller.handleAt(
+              selected,
+              point,
+              zoom
+            );
+
+          if (handle) {
+            editRef.current =
+              controller.beginEdit(
+                selected,
+                handle,
+                point,
+                zoom
+              );
+
+            isDrawingRef.current =
+              true;
+
+            setIsDrawing(
+              true
+            );
+
+            renderNow();
+
+            return;
           }
+        }
+
+        const hit =
+          controller.hitTest(
+            annotations,
+            point,
+            zoom
+          );
+
+        if (hit) {
+          setSelectedInk({
+            id: hit.id,
+            pageNum:
+              targetPageNum
+          });
+
+          editRef.current =
+            controller.beginEdit(
+              hit,
+              'move',
+              point,
+              zoom
+            );
+
+          isDrawingRef.current =
+            true;
+
+          setIsDrawing(
+            true
+          );
+        } else {
+          setSelectedInk(
+            null
+          );
+        }
+
+        renderNow();
+
+        return;
+      }
+
+      // =====================================================
+      // LASER
+      // =====================================================
+
+      if (
+        activeTool ===
+        'laser'
+      ) {
+        try {
+          e.currentTarget.setPointerCapture(
+            e.pointerId
+          );
+        } catch {}
+
+        const laser =
+          LaserTool.createLaser(
+            point,
+            {
+              color:
+                strokeColor ||
+                '#ef4444',
+
+              width:
+                laserWidth
+            }
+          );
+
+        activeLaserRef.current =
+          laser;
+
+        laserStrokesRef.current =
+          [
+            ...laserStrokesRef.current,
+            laser
+          ];
+
+        isDrawingRef.current =
+          true;
+
+        setIsDrawing(
+          true
         );
 
-      laserTrailRef.current =
-        laser;
+        startLaserLoop();
 
-      setIsDrawing(true);
+        renderNow();
 
-      startLaserLoop();
+        return;
+      }
 
-      scheduleRender();
+      // =====================================================
+      // ERASER
+      // =====================================================
 
-      return;
-    }
+      if (
+        activeTool ===
+        'eraser'
+      ) {
+        try {
+          e.currentTarget.setPointerCapture(
+            e.pointerId
+          );
+        } catch {}
 
-    // -------------------------------------------------------
-    // ERASER
-    // -------------------------------------------------------
+        eraseHistoryCapturedRef.current =
+          false;
 
-    if (activeTool === 'eraser') {
-      try {
-        e.currentTarget.setPointerCapture(
-          e.pointerId
+        isDrawingRef.current =
+          true;
+
+        setIsDrawing(
+          true
         );
-      } catch {}
 
-      eraseHistoryCapturedRef.current =
-        false;
+        lastEraserPointRef.current =
+          point;
 
-      setIsDrawing(true);
+        eraseAlong(
+          point,
+          point
+        );
 
-      eraseAtPoint(point);
+        renderNow();
 
-      return;
-    }
+        return;
+      }
 
-    // -------------------------------------------------------
-    // TEXT
-    // -------------------------------------------------------
+      // =====================================================
+      // TEXT
+      // =====================================================
 
-    if (activeTool === 'text') {
-      setEditingText({
-        x: point.x,
-        y: point.y,
-        text: ''
-      });
+      if (
+        activeTool ===
+        'text'
+      ) {
+        setEditingText({
+          x: point.x,
+          y: point.y,
+          text: ''
+        });
 
-      setTimeout(() => {
-        textInputRef.current?.focus();
-      }, 20);
-    }
-  };
+        setTimeout(() => {
+          textInputRef.current?.focus();
+        }, 20);
+      }
+    };
 
   // =========================================================
   // POINTER MOVE
   // =========================================================
 
-  const handlePointerMove = e => {
-    if (!isInteractive) {
-      return;
-    }
-
-    // Multi-touch protection: don't draw if multiple fingers are touching
-    if (e.pointerType === 'touch') {
-      if (activeTouchesRef.current.size >= 2) {
-        return;
-      }
-    }
-
-    const point =
-      getDocCoordinates(e);
-
-    setLiveCoords(point);
-    setCursorPoint(point);
-
-    // -------------------------------------------------------
-    // NOT DRAWING
-    // -------------------------------------------------------
-
-    if (!isDrawing) {
-      scheduleRender();
-      return;
-    }
-
-    // -------------------------------------------------------
-    // LASER TOOL
-    // -------------------------------------------------------
-
-    if (activeTool === 'laser') {
-      if (laserTrailRef.current) {
-        LaserTool.addPoint(laserTrailRef.current, point);
-        scheduleRender();
-      }
-      return;
-    }
-
-    // -------------------------------------------------------
-    // PEN / MAGIC PEN / HIGHLIGHTER
-    // -------------------------------------------------------
-
-    if (
-      activeTool === 'pen' ||
-      activeTool === 'magicPen' ||
-      activeTool === 'highlighter'
-    ) {
-      const stroke =
-        activeStrokeRef.current;
-
-      if (!stroke) {
+  const handlePointerMove =
+    e => {
+      if (
+        !isInteractive
+      ) {
         return;
       }
 
-      const events =
-        typeof e.getCoalescedEvents ===
-        'function'
-          ? e.getCoalescedEvents()
-          : [e];
+      // Touch multi-finger protection
+      if (
+        e.pointerType ===
+        'touch'
+      ) {
+        if (
+          activeTouchesRef.current
+            .size >= 2
+        ) {
+          return;
+        }
+      }
 
-      for (const event of events) {
-        const p =
-          getDocCoordinates(event);
+      const point =
+        getDocCoordinates(e);
 
-        PenTool.addPoint(
-          stroke,
-          p,
-          1.1
+      setLiveCoords(point);
+
+      if (trackCursor) {
+        setCursorPoint(
+          point
         );
       }
 
-      scheduleRender();
+      // IMPORTANT:
+      // Use ref instead of React state.
+      if (
+        !isDrawingRef.current
+      ) {
+        scheduleRender();
+        return;
+      }
 
-      return;
-    }
+      // =====================================================
+      // SHAPE EDIT
+      // =====================================================
 
-    // -------------------------------------------------------
-    // ERASER
-    // -------------------------------------------------------
+      if (
+        activeTool ===
+        'shapeEdit'
+      ) {
+        const session =
+          editRef.current;
 
-    if (
-      activeTool === 'eraser'
-    ) {
-      eraseAtPoint(point);
-    }
-  };
+        if (session) {
+          const updated =
+            controllerRef.current.updateEdit(
+              session,
+              point
+            );
+
+          session.moved =
+            true;
+
+          annotationsRef.current =
+            annotationsRef.current.map(
+              a =>
+                a.id ===
+                  session.id
+                  ? updated
+                  : a
+            );
+
+          renderNow();
+        }
+
+        return;
+      }
+
+      // =====================================================
+      // LASER
+      // =====================================================
+
+      if (
+        activeTool ===
+        'laser'
+      ) {
+        if (
+          activeLaserRef.current
+        ) {
+          const laserEvents =
+            typeof e.getCoalescedEvents ===
+            'function'
+              ? e.getCoalescedEvents()
+              : [e];
+
+          for (
+            const laserEvent of
+              laserEvents
+          ) {
+            LaserTool.addPoint(
+              activeLaserRef.current,
+              getDocCoordinates(
+                laserEvent
+              )
+            );
+          }
+
+          startLaserLoop();
+
+          renderNow();
+        }
+
+        return;
+      }
+
+      // =====================================================
+      // PEN / MAGIC PEN / HIGHLIGHTER
+      // =====================================================
+
+      if (
+        activeTool ===
+          'pen' ||
+        activeTool ===
+          'magicPen' ||
+        activeTool ===
+          'highlighter'
+      ) {
+        const stroke =
+          activeStrokeRef.current;
+
+        if (!stroke) {
+          return;
+        }
+
+        // MAGIC PEN
+        if (
+          activeTool ===
+          'magicPen'
+        ) {
+          strokeManagerRef.current.addAll(
+            inputRef.current.samples(
+              e,
+              getDocCoordinates
+            ),
+            1.1
+          );
+
+          // IMPORTANT:
+          // Paint immediately.
+          renderNow();
+
+          return;
+        }
+
+        const events =
+          typeof e.getCoalescedEvents ===
+          'function'
+            ? e.getCoalescedEvents()
+            : [e];
+
+        for (
+          const event of events
+        ) {
+          const p =
+            getDocCoordinates(
+              event
+            );
+
+          PenTool.addPoint(
+            stroke,
+            p,
+            1.1
+          );
+        }
+
+        // IMPORTANT:
+        // Do not wait for React.
+        renderNow();
+
+        return;
+      }
+
+      // =====================================================
+      // ERASER
+      // =====================================================
+
+      if (
+        activeTool ===
+        'eraser'
+      ) {
+        eraseAlong(
+          lastEraserPointRef.current,
+          point
+        );
+
+        lastEraserPointRef.current =
+          point;
+
+        // Immediate cursor/update.
+        renderNow();
+      }
+    };
 
   // =========================================================
   // FINISH DRAWING
   // =========================================================
 
-  const finishDrawing = e => {
-    if (e?.pointerType === 'touch') {
-      activeTouchesRef.current.delete(e.pointerId);
-    }
-
-    if (!isDrawing) {
-      return;
-    }
-
-    if (e?.preventDefault) {
-      e.preventDefault();
-    }
-
-    setIsDrawing(false);
-
-    try {
-      e?.currentTarget?.releasePointerCapture(
-        e.pointerId
-      );
-    } catch {}
-
-    // Laser trail self-dissolves, never saved permanently
-    if (activeTool === 'laser') {
-      scheduleRender();
-      return;
-    }
-
-    // -------------------------------------------------------
-    // FINISH PEN / MAGIC PEN / HIGHLIGHTER
-    // -------------------------------------------------------
-
-    if (
-      activeStrokeRef.current
-    ) {
-      let stroke =
-        activeStrokeRef.current;
-
+  const finishDrawing =
+    e => {
       if (
-        stroke.points &&
-        stroke.points.length > 0
+        e?.pointerType ===
+        'touch'
       ) {
-        // Auto-correct shape if Magic Pen is active
-        if (activeTool === 'magicPen') {
-          stroke = MagicPenTool.autoCorrectStroke(stroke);
-        }
-
-        /*
-         * Keep local reference immediately
-         * so the stroke appears without waiting
-         * for another render cycle.
-         */
-        annotationsRef.current = [
-          ...annotationsRef.current,
-          stroke
-        ];
-
-        addAnnotation(stroke, targetPageNum);
+        activeTouchesRef.current.delete(
+          e.pointerId
+        );
       }
 
-      activeStrokeRef.current =
+      // Use ref, NOT React state.
+      if (
+        !isDrawingRef.current
+      ) {
+        return;
+      }
+
+      if (
+        e?.preventDefault
+      ) {
+        e.preventDefault();
+      }
+
+      isDrawingRef.current =
+        false;
+
+      setIsDrawing(
+        false
+      );
+
+      try {
+        e?.currentTarget?.releasePointerCapture(
+          e.pointerId
+        );
+      } catch {}
+
+      // =====================================================
+      // SHAPE EDIT
+      // =====================================================
+
+      if (
+        activeTool ===
+        'shapeEdit'
+      ) {
+        const session =
+          editRef.current;
+
+        editRef.current =
+          null;
+
+        if (
+          session &&
+          session.moved
+        ) {
+          pushHistory();
+
+          setPageAnnotations(
+            annotationsRef.current,
+            targetPageNum
+          );
+        }
+
+        renderNow();
+
+        return;
+      }
+
+      // =====================================================
+      // LASER
+      // =====================================================
+
+      if (
+        activeTool ===
+        'laser'
+      ) {
+        LaserTool.finish(
+          activeLaserRef.current
+        );
+
+        activeLaserRef.current =
+          null;
+
+        startLaserLoop();
+
+        renderNow();
+
+        return;
+      }
+
+      // =====================================================
+      // PEN / MAGIC PEN / HIGHLIGHTER
+      // =====================================================
+
+      if (
+        activeStrokeRef.current
+      ) {
+        const stroke =
+          activeStrokeRef.current;
+
+        if (
+          stroke.points &&
+          stroke.points.length >
+            0
+        ) {
+          if (
+            activeTool ===
+            'magicPen'
+          ) {
+            strokeManagerRef.current.end();
+
+            handleSmartStroke(
+              stroke
+            );
+          } else {
+            annotationsRef.current =
+              [
+                ...annotationsRef.current,
+                stroke
+              ];
+
+            addAnnotation(
+              stroke,
+              targetPageNum
+            );
+          }
+        }
+
+        activeStrokeRef.current =
+          null;
+      }
+
+      // =====================================================
+      // ERASER RESET
+      // =====================================================
+
+      eraseHistoryCapturedRef.current =
+        false;
+
+      lastEraserPointRef.current =
         null;
-    }
 
-    // -------------------------------------------------------
-    // RESET ERASER HISTORY
-    // -------------------------------------------------------
-
-    eraseHistoryCapturedRef.current =
-      false;
-
-    scheduleRender();
-  };
+      renderNow();
+    };
 
   // =========================================================
   // POINTER CANCEL
   // =========================================================
 
-  const handlePointerCancel = e => {
-    if (e?.pointerType === 'touch') {
-      activeTouchesRef.current.delete(e.pointerId);
-    }
+  const handlePointerCancel =
+    e => {
+      if (
+        e?.pointerType ===
+        'touch'
+      ) {
+        activeTouchesRef.current.delete(
+          e.pointerId
+        );
+      }
 
-    setIsDrawing(false);
+      isDrawingRef.current =
+        false;
 
-    activeStrokeRef.current =
-      null;
-
-    eraseHistoryCapturedRef.current =
-      false;
-
-    try {
-      e?.currentTarget?.releasePointerCapture(
-        e.pointerId
+      setIsDrawing(
+        false
       );
-    } catch {}
 
-    scheduleRender();
-  };
+      activeStrokeRef.current =
+        null;
+
+      strokeManagerRef.current.cancel();
+
+      // Restore cancelled edit.
+      if (
+        editRef.current
+      ) {
+        const session =
+          editRef.current;
+
+        editRef.current =
+          null;
+
+        annotationsRef.current =
+          annotationsRef.current.map(
+            a =>
+              a.id === session.id
+                ? session.original
+                : a
+          );
+      }
+
+      // Cancel laser.
+      if (
+        activeLaserRef.current
+      ) {
+        LaserTool.finish(
+          activeLaserRef.current
+        );
+
+        activeLaserRef.current =
+          null;
+
+        startLaserLoop();
+      }
+
+      eraseHistoryCapturedRef.current =
+        false;
+
+      lastEraserPointRef.current =
+        null;
+
+      try {
+        e?.currentTarget?.releasePointerCapture(
+          e.pointerId
+        );
+      } catch {}
+
+      renderNow();
+    };
 
   // =========================================================
   // TEXT SAVE
@@ -798,14 +2222,18 @@ export default function AnnotationLayer({
 
   const handleSaveText =
     useCallback(() => {
-      if (!editingText) {
+      if (
+        !editingText
+      ) {
         return;
       }
 
       const text =
         editingText.text.trim();
 
-      if (text.length > 0) {
+      if (
+        text.length > 0
+      ) {
         const annotation =
           TextTool.createText(
             editingText.x,
@@ -813,14 +2241,16 @@ export default function AnnotationLayer({
             text,
             {
               fontSize: 18,
-              color: strokeColor
+              color:
+                strokeColor
             }
           );
 
-        annotationsRef.current = [
-          ...annotationsRef.current,
-          annotation
-        ];
+        annotationsRef.current =
+          [
+            ...annotationsRef.current,
+            annotation
+          ];
 
         addAnnotation(
           annotation,
@@ -828,7 +2258,9 @@ export default function AnnotationLayer({
         );
       }
 
-      setEditingText(null);
+      setEditingText(
+        null
+      );
 
       setTimeout(() => {
         canvasRef.current?.focus();
@@ -844,57 +2276,92 @@ export default function AnnotationLayer({
   // TEXT KEYBOARD
   // =========================================================
 
-  const handleTextKeyDown = e => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
+  const handleTextKeyDown =
+    e => {
+      if (
+        e.key === 'Escape'
+      ) {
+        e.preventDefault();
 
-      setEditingText(null);
+        setEditingText(
+          null
+        );
 
-      return;
-    }
+        return;
+      }
 
-    if (
-      e.key === 'Enter' &&
-      !e.shiftKey
-    ) {
-      e.preventDefault();
+      if (
+        e.key === 'Enter' &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
 
-      handleSaveText();
-    }
-  };
+        handleSaveText();
+      }
+    };
 
   // =========================================================
   // POINTER LEAVE
   // =========================================================
 
-  const handlePointerLeave = () => {
-    if (!isDrawing) {
-      setCursorPoint(null);
+  const handlePointerLeave =
+    () => {
+      if (
+        !isDrawingRef.current
+      ) {
+        setCursorPoint(
+          null
+        );
 
-      scheduleRender();
-    }
-  };
+        renderNow();
+      }
+    };
 
   // =========================================================
   // CURSOR
   // =========================================================
 
-  let cursor = 'crosshair';
+  let cursor =
+    'crosshair';
 
-  if (activeTool === 'text') {
-    cursor = 'text';
+  if (
+    activeTool ===
+    'text'
+  ) {
+    cursor =
+      'text';
   }
 
-  if (activeTool === 'eraser') {
-    cursor = 'none';
+  if (
+    activeTool ===
+    'eraser'
+  ) {
+    cursor =
+      'none';
   }
 
-  if (activeTool === 'laser') {
-    cursor = 'crosshair';
+  if (
+    activeTool ===
+    'laser'
+  ) {
+    cursor =
+      'crosshair';
   }
 
-  if (activeTool === 'pan') {
-    cursor = 'grab';
+  if (
+    activeTool ===
+    'pan'
+  ) {
+    cursor =
+      'grab';
+  }
+
+  if (
+    activeTool ===
+    'shapeEdit'
+  ) {
+    cursor =
+      'default';
   }
 
   // =========================================================
@@ -904,7 +2371,9 @@ export default function AnnotationLayer({
   return (
     <div
       style={{
-        position: 'absolute',
+        position:
+          'absolute',
+
         top: 0,
         left: 0,
 
@@ -917,7 +2386,9 @@ export default function AnnotationLayer({
         zIndex: 10,
 
         pointerEvents:
-          isInteractive && activeTool !== 'pan'
+          isInteractive &&
+          activeTool !==
+            'pan'
             ? 'auto'
             : 'none'
       }}
@@ -947,7 +2418,8 @@ export default function AnnotationLayer({
         }
 
         style={{
-          display: 'block',
+          display:
+            'block',
 
           width:
             `${width * zoom}px`,
@@ -967,17 +2439,166 @@ export default function AnnotationLayer({
               ? 'auto'
               : 'none',
 
-          userSelect: 'none',
+          userSelect:
+            'none',
 
           WebkitUserSelect:
             'none'
         }}
       />
 
+      {/* =====================================================
+          SMART PEN NOTICE
+          ===================================================== */}
+
+      {smartNotice && (
+        <div
+          role="status"
+          style={{
+            position:
+              'absolute',
+
+            left:
+              `${smartNotice.x}px`,
+
+            top:
+              `${smartNotice.y}px`,
+
+            zIndex: 120,
+
+            display:
+              'flex',
+
+            alignItems:
+              'center',
+
+            gap: '8px',
+
+            padding:
+              '6px 8px 6px 14px',
+
+            background:
+              'rgba(15, 23, 42, 0.93)',
+
+            color:
+              '#ffffff',
+
+            borderRadius:
+              '999px',
+
+            fontSize:
+              '12px',
+
+            boxShadow:
+              '0 6px 18px rgba(15, 23, 42, 0.28)',
+
+            whiteSpace:
+              'nowrap',
+
+            pointerEvents:
+              'auto',
+
+            touchAction:
+              'manipulation',
+
+            userSelect:
+              'none'
+          }}
+
+          onPointerDown={
+            e =>
+              e.stopPropagation()
+          }
+        >
+          <span>
+            {smartNotice.mode ===
+            'auto'
+              ? '\u2713 '
+              : '? '}
+
+            {smartNotice.label}
+
+            {smartNotice.mode ===
+            'auto'
+              ? ' detected'
+              : ' suggested'}
+
+            {' \u2014 '}
+
+            {
+              smartNotice.percent
+            }
+            % confidence
+          </span>
+
+          {smartNotice.mode ===
+          'auto' ? (
+            <>
+              <button
+                type="button"
+                style={
+                  chipButtonStyle
+                }
+                onClick={
+                  undoCorrection
+                }
+              >
+                Undo
+              </button>
+
+              <button
+                type="button"
+                style={
+                  chipButtonStyle
+                }
+                onClick={
+                  editCorrectedShape
+                }
+              >
+                Edit
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                style={{
+                  ...chipButtonStyle,
+                  background:
+                    '#2563eb'
+                }}
+                onClick={
+                  acceptSuggestion
+                }
+              >
+                Accept
+              </button>
+
+              <button
+                type="button"
+                style={
+                  chipButtonStyle
+                }
+                onClick={
+                  dismissSmartNotice
+                }
+              >
+                Reject
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* =====================================================
+          TEXT INPUT
+          ===================================================== */}
+
       {editingText && (
         <div
           style={{
-            position: 'absolute',
+            position:
+              'absolute',
 
             left:
               `${editingText.x * zoom}px`,
@@ -987,31 +2608,38 @@ export default function AnnotationLayer({
 
             zIndex: 100,
 
-            pointerEvents: 'auto'
+            pointerEvents:
+              'auto'
           }}
 
-          onPointerDown={e =>
-            e.stopPropagation()
+          onPointerDown={
+            e =>
+              e.stopPropagation()
           }
         >
           <textarea
-            ref={textInputRef}
+            ref={
+              textInputRef
+            }
 
             value={
               editingText.text
             }
 
-            onChange={e => {
-              const value =
-                e.target.value;
+            onChange={
+              e => {
+                const value =
+                  e.target.value;
 
-              setEditingText(
-                previous => ({
-                  ...previous,
-                  text: value
-                })
-              );
-            }}
+                setEditingText(
+                  previous => ({
+                    ...previous,
+                    text:
+                      value
+                  })
+                );
+              }
+            }
 
             onKeyDown={
               handleTextKeyDown
@@ -1028,36 +2656,47 @@ export default function AnnotationLayer({
             placeholder="Type a math note..."
 
             style={{
-              minWidth: '220px',
-              minHeight: '54px',
+              minWidth:
+                '220px',
+
+              minHeight:
+                '54px',
 
               padding:
                 '9px 11px',
 
-              resize: 'both',
+              resize:
+                'both',
 
               border:
                 '2px solid var(--math-blue)',
 
-              borderRadius: '9px',
+              borderRadius:
+                '9px',
 
-              outline: 'none',
+              outline:
+                'none',
 
-              background: '#ffffff',
+              background:
+                '#ffffff',
 
-              color: '#172033',
+              color:
+                '#172033',
 
               boxShadow:
                 '0 8px 24px rgba(15,23,42,0.16)',
 
-              fontSize: '18px',
+              fontSize:
+                '18px',
 
               fontFamily:
                 'Inter, Arial, sans-serif',
 
-              lineHeight: 1.3,
+              lineHeight:
+                1.3,
 
-              userSelect: 'text',
+              userSelect:
+                'text',
 
               WebkitUserSelect:
                 'text'
@@ -1068,3 +2707,4 @@ export default function AnnotationLayer({
     </div>
   );
 }
+

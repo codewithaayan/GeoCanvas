@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
+import { readGeoCanvasLayers, stripGeoCanvasOverlay } from './geocanvasLayers';
 
 // Configure PDF.js worker
 try {
@@ -38,32 +39,59 @@ export async function loadPdfDocument(source, fileName = 'Document.pdf') {
     // Check for embedded GeoCanvas editable layers in the PDF
     let cleanData = data;
     let embeddedPagesData = null;
+    let blankInfo = null;
 
     try {
       const pdfLibDoc = await PDFDocument.load(data.slice(0), { ignoreEncryption: true });
-      const subject = pdfLibDoc.getSubject();
-      if (subject && subject.startsWith('GEOCANVAS_DATA:')) {
-        const base64Str = subject.replace('GEOCANVAS_DATA:', '');
-        const jsonStr = decodeURIComponent(escape(atob(base64Str)));
-        const parsed = JSON.parse(jsonStr);
-        if (parsed && parsed.pagesData) {
-          embeddedPagesData = parsed.pagesData;
-          // Strip the added raster annotation stream so the underlying PDF is clean
-          if (parsed.hasAnnotationOverlay) {
-            const pages = pdfLibDoc.getPages();
-            for (const p of pages) {
-              const contents = p.node.Contents();
-              if (contents && typeof contents.size === 'function' && contents.size() > 1) {
-                contents.remove(contents.size() - 1);
-              }
-            }
-            const cleanBytes = await pdfLibDoc.save();
-            cleanData = cleanBytes.buffer;
-          }
+      const layers = readGeoCanvasLayers(pdfLibDoc);
+
+      if (layers && layers.data && layers.data.pagesData) {
+        const saved = layers.data;
+        embeddedPagesData = saved.pagesData;
+
+        // Remove the flattened picture of the ink so only the editable
+        // vector layer remains (otherwise old lines could not be erased)
+        stripGeoCanvasOverlay(pdfLibDoc, layers);
+
+        const cleanBytes = await pdfLibDoc.save();
+        cleanData = cleanBytes.buffer.slice(
+          cleanBytes.byteOffset,
+          cleanBytes.byteOffset + cleanBytes.byteLength
+        );
+
+        // Exported from a blank workspace: go back to the blank paper
+        // (grid + theme) instead of treating it as an imported PDF
+        if (saved.blankWorkspace) {
+          const first = pdfLibDoc.getPages()[0];
+          const size = first ? first.getSize() : { width: 595.28, height: 841.89 };
+
+          blankInfo = {
+            numPages: pdfLibDoc.getPageCount(),
+            width: size.width,
+            height: size.height,
+            gridType: saved.gridType || 'none',
+            theme: saved.theme || null
+          };
         }
       }
     } catch (metaErr) {
-      console.warn('Could not inspect embedded GeoCanvas metadata:', metaErr);
+      console.warn('Could not inspect embedded GeoCanvas layers:', metaErr);
+    }
+
+    if (blankInfo) {
+      return {
+        success: true,
+        isBlankWorkspace: true,
+        pdfDoc: null,
+        numPages: blankInfo.numPages,
+        fileName,
+        arrayBuffer: null,
+        naturalWidth: blankInfo.width,
+        naturalHeight: blankInfo.height,
+        embeddedPagesData,
+        gridType: blankInfo.gridType,
+        theme: blankInfo.theme
+      };
     }
 
     // Hand pdf.js its own clone of cleanData so original remains intact

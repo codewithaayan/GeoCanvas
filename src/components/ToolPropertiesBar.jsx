@@ -24,8 +24,21 @@ export default function ToolPropertiesBar() {
     setEraserSize,
 
     snapToTools,
-    setSnapToTools
+    setSnapToTools,
+
+    pages,
+    selectedInk,
+    setSelectedInk,
+    updateAnnotation,
+    removeAnnotation
   } = useStore();
+
+  const selectedAnnotation =
+    selectedInk
+      ? (pages?.[selectedInk.pageNum]?.annotations || []).find(
+          a => a.id === selectedInk.id
+        ) || null
+      : null;
 
   const penColors = [
     { label: 'Royal Blue', value: '#1d4ed8' },
@@ -151,6 +164,109 @@ export default function ToolPropertiesBar() {
               ))}
             </div>
           </div>
+        </>
+      )}
+
+      {activeTool === 'magicPen' && (
+        <>
+          <div className="property-divider" />
+          <span
+            style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              maxWidth: '360px'
+            }}
+          >
+            Draw naturally. When you lift the pen, lines, angles and shapes
+            snap clean. Unsure shapes show Accept / Reject.
+          </span>
+        </>
+      )}
+
+      {activeTool === 'shapeEdit' && (
+        <>
+          {!selectedAnnotation && (
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+              Tap a line or shape to select it. Drag to move; use the corner
+              squares to resize and the round handle to rotate.
+            </span>
+          )}
+
+          {selectedAnnotation && (
+            <>
+              <div className="property-group">
+                <span className="property-label">Ink</span>
+
+                <div className="color-row">
+                  {penColors.map(c => (
+                    <button
+                      key={c.value}
+                      onClick={() =>
+                        updateAnnotation(
+                          selectedAnnotation.id,
+                          { color: c.value },
+                          selectedInk.pageNum
+                        )
+                      }
+                      className={
+                        selectedAnnotation.color === c.value
+                          ? 'color-dot selected'
+                          : 'color-dot'
+                      }
+                      style={{ background: c.value }}
+                      title={c.label}
+                      aria-label={c.label}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="property-divider" />
+
+              <div className="property-group">
+                <span className="property-label">Width</span>
+
+                <div className="option-row">
+                  {penWidths.map(w => (
+                    <button
+                      key={w}
+                      onClick={() =>
+                        updateAnnotation(
+                          selectedAnnotation.id,
+                          { width: w },
+                          selectedInk.pageNum
+                        )
+                      }
+                      className={
+                        selectedAnnotation.width === w
+                          ? 'property-option active'
+                          : 'property-option'
+                      }
+                    >
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="property-divider" />
+
+              <button
+                className="property-option"
+                onClick={() => {
+                  removeAnnotation(
+                    selectedAnnotation.id,
+                    selectedInk.pageNum
+                  );
+                  setSelectedInk(null);
+                }}
+                title="Delete selected (Delete key)"
+                style={{ color: '#dc2626', fontWeight: 600 }}
+              >
+                Delete
+              </button>
+            </>
+          )}
         </>
       )}
 
@@ -344,7 +460,7 @@ export default function ToolPropertiesBar() {
             </div>
           </div>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '12px' }}>
-            Trail self-dissolves automatically
+            Marks fade after 20 seconds, or vanish when you switch tools
           </span>
         </>
       )}

@@ -7,6 +7,7 @@ import React, {
 
 import { useStore } from "../state/StoreContext";
 
+import { usePlainZeroFont } from "../geometry/plainZeroFont";
 import { RulerModel } from "../geometry/Ruler";
 import { ProtractorModel } from "../geometry/Protractor";
 import { CompassModel } from "../geometry/Compass";
@@ -887,6 +888,9 @@ export default function GeometryLayer({
       if (!ctx) {
         return;
       }
+
+      // numbers on rulers / protractors use a plain zero (no dot inside)
+      usePlainZeroFont(ctx);
 
       const safeZoom =
         Number(zoom) || 1;

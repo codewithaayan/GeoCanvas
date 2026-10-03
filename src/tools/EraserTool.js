@@ -1,326 +1,448 @@
-import { pointToSegmentDistance, distance } from '../geometry/math';
+import { distance } from '../geometry/math';
+
+let partCounter = 0;
+
+/**
+ * Find the portion of segment A -> B that lies inside a circle.
+ *
+ * Returns:
+ *   [t1, t2] where 0 <= t1 <= t2 <= 1
+ *
+ * Returns null if the segment does not intersect the circle.
+ */
+function segmentCircleInterval(a, b, center, radius) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  const fx = a.x - center.x;
+  const fy = a.y - center.y;
+
+  const A = dx * dx + dy * dy;
+
+  // A very tiny segment / point
+  if (A < 1e-9) {
+    const inside =
+      fx * fx + fy * fy <= radius * radius;
+
+    return inside ? [0, 1] : null;
+  }
+
+  const B = 2 * (fx * dx + fy * dy);
+  const C =
+    fx * fx +
+    fy * fy -
+    radius * radius;
+
+  const discriminant =
+    B * B -
+    4 * A * C;
+
+  if (discriminant < 0) {
+    return null;
+  }
+
+  const sqrtDiscriminant = Math.sqrt(discriminant);
+
+  let t1 =
+    (-B - sqrtDiscriminant) /
+    (2 * A);
+
+  let t2 =
+    (-B + sqrtDiscriminant) /
+    (2 * A);
+
+  // Make sure t1 <= t2
+  if (t1 > t2) {
+    [t1, t2] = [t2, t1];
+  }
+
+  // Entire intersection is outside the segment
+  if (t2 < 0 || t1 > 1) {
+    return null;
+  }
+
+  t1 = Math.max(0, t1);
+  t2 = Math.min(1, t2);
+
+  return [t1, t2];
+}
+
+/**
+ * Interpolate between two points.
+ */
+function lerpPoint(a, b, t) {
+  const pressureA = a.pressure ?? 0.5;
+  const pressureB = b.pressure ?? 0.5;
+
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    pressure:
+      pressureA +
+      (pressureB - pressureA) * t
+  };
+}
+
+/**
+ * Calculate total length of a stroke/run.
+ */
+function runLength(run) {
+  let length = 0;
+
+  for (let i = 1; i < run.length; i++) {
+    length += Math.hypot(
+      run[i].x - run[i - 1].x,
+      run[i].y - run[i - 1].y
+    );
+  }
+
+  return length;
+}
+
+/**
+ * Add a point to a run while avoiding duplicate points.
+ */
+function pushPoint(run, point) {
+  const last = run[run.length - 1];
+
+  if (
+    !last ||
+    Math.hypot(
+      last.x - point.x,
+      last.y - point.y
+    ) > 0.05
+  ) {
+    run.push({
+      x: point.x,
+      y: point.y,
+      pressure: point.pressure ?? 0.5
+    });
+  }
+}
+
+/**
+ * Cut a stroke with a circular eraser.
+ *
+ * Returns:
+ *   null -> stroke was untouched
+ *   []   -> stroke was completely erased
+ *   runs -> surviving pieces
+ */
+function cutStroke(points, center, radius) {
+  if (!points || points.length === 0) {
+    return null;
+  }
+
+  // Single-point stroke / dot
+  if (points.length === 1) {
+    return distance(points[0], center) <= radius
+      ? []
+      : null;
+  }
+
+  const runs = [];
+
+  let currentRun = [];
+  let touched = false;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+
+    const hit = segmentCircleInterval(
+      a,
+      b,
+      center,
+      radius
+    );
+
+    /**
+     * Segment does not intersect eraser.
+     */
+    if (!hit) {
+      pushPoint(currentRun, a);
+      pushPoint(currentRun, b);
+      continue;
+    }
+
+    touched = true;
+
+    const [t1, t2] = hit;
+
+    /**
+     * Portion BEFORE the eraser.
+     */
+    if (t1 > 1e-6) {
+      pushPoint(currentRun, a);
+
+      pushPoint(
+        currentRun,
+        lerpPoint(a, b, t1)
+      );
+    }
+
+    /**
+     * The middle portion is erased.
+     *
+     * Close the current surviving run.
+     */
+    if (currentRun.length > 0) {
+      runs.push(currentRun);
+      currentRun = [];
+    }
+
+    /**
+     * Portion AFTER the eraser.
+     */
+    if (t2 < 1 - 1e-6) {
+      pushPoint(
+        currentRun,
+        lerpPoint(a, b, t2)
+      );
+
+      pushPoint(currentRun, b);
+    }
+  }
+
+  /**
+   * Add final surviving run.
+   */
+  if (currentRun.length > 0) {
+    runs.push(currentRun);
+  }
+
+  /**
+   * Nothing was actually touched.
+   */
+  if (!touched) {
+    return null;
+  }
+
+  /**
+   * Closed shape handling.
+   *
+   * If a circle/rectangle/square begins and ends at
+   * approximately the same point, the two surviving
+   * ends can be joined back together.
+   */
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  const isClosed =
+    Math.hypot(
+      first.x - last.x,
+      first.y - last.y
+    ) < 0.5;
+
+  if (isClosed && runs.length >= 2) {
+    const head = runs[0];
+    const tail = runs[runs.length - 1];
+
+    const headStartsAtOrigin =
+      head.length > 0 &&
+      Math.hypot(
+        head[0].x - first.x,
+        head[0].y - first.y
+      ) < 0.5;
+
+    const tailEndsAtOrigin =
+      tail.length > 0 &&
+      Math.hypot(
+        tail[tail.length - 1].x - last.x,
+        tail[tail.length - 1].y - last.y
+      ) < 0.5;
+
+    if (
+      headStartsAtOrigin &&
+      tailEndsAtOrigin
+    ) {
+      runs.splice(0, 1);
+
+      runs[runs.length - 1] =
+        tail.concat(head.slice(1));
+    }
+  }
+
+  /**
+   * Remove tiny pieces which would otherwise
+   * appear as dots after erasing.
+   */
+  return runs.filter(
+    (run) =>
+      run.length >= 2 &&
+      runLength(run) >= 1.5
+  );
+}
 
 export class EraserTool {
-  /*
-   * Partial/vector eraser.
+  /**
+   * Partially erase vector strokes.
    *
-   * Pen and highlighter strokes are split into smaller stroke objects.
-   * Only the section touched by the eraser is removed.
+   * Pen and highlighter strokes are split into
+   * surviving pieces.
    *
-   * Text remains an object-level erase because text is not a freehand stroke.
+   * Text is removed as a complete object.
    */
-  static eraseStrokes(annotations, eraserPoint, radius = 16) {
+  static eraseStrokes(
+    annotations,
+    eraserPoint,
+    radius = 16
+  ) {
+    if (
+      !Array.isArray(annotations) ||
+      !eraserPoint
+    ) {
+      return {
+        updatedAnnotations: annotations || [],
+        deletedAnnotations: [],
+        changed: false
+      };
+    }
+
     const updatedAnnotations = [];
-    const changedAnnotations = [];
+    const deletedAnnotations = [];
 
-    for (const ann of annotations) {
-      if (
-        ann.type !== 'pen' &&
-        ann.type !== 'highlighter'
-      ) {
-        if (ann.type === 'text') {
-          const d = distance(
-            eraserPoint,
-            { x: ann.x, y: ann.y }
-          );
-
-          if (d <= radius + 20) {
-            changedAnnotations.push(ann);
-            continue;
-          }
-        }
-
-        updatedAnnotations.push(ann);
-        continue;
-      }
-
-      const points = ann.points || [];
-
-      if (points.length === 0) {
-        updatedAnnotations.push(ann);
-        continue;
-      }
-
-      const effectiveRadius =
-        radius + (ann.width || 3) / 2;
-
-      const runs = [];
-      let currentRun = [];
-
-      const isPointInside = (point) => {
-        return distance(
-          point,
-          eraserPoint
-        ) <= effectiveRadius;
-      };
-
-      const segmentHitsEraser = (a, b) => {
-        return pointToSegmentDistance(
+    for (const annotation of annotations) {
+      /**
+       * TEXT
+       *
+       * Text is treated as a complete object.
+       */
+      if (annotation.type === 'text') {
+        const textDistance = distance(
           eraserPoint,
-          a,
-          b
-        ).distance <= effectiveRadius;
-      };
-
-      /*
-       * Add a point to the current surviving run.
-       */
-      const pushPoint = (point) => {
-        if (!point) return;
-
-        const last =
-          currentRun[currentRun.length - 1];
-
-        if (
-          !last ||
-          distance(last, point) > 0.25
-        ) {
-          currentRun.push({
-            x: point.x,
-            y: point.y,
-            pressure:
-              point.pressure ?? 0.5
-          });
-        }
-      };
-
-      /*
-       * Estimate the point where a line segment enters/exits
-       * the eraser circle.
-       */
-      const findBoundaryPoint = (
-        a,
-        b,
-        insideAtStart,
-        insideAtEnd
-      ) => {
-        let lo = 0;
-        let hi = 1;
-
-        for (let i = 0; i < 12; i++) {
-          const t = (lo + hi) / 2;
-
-          const point = {
-            x: a.x + (b.x - a.x) * t,
-            y: a.y + (b.y - a.y) * t
-          };
-
-          const inside = isPointInside(point);
-
-          if (
-            inside === insideAtStart
-          ) {
-            lo = t;
-          } else {
-            hi = t;
+          {
+            x: annotation.x,
+            y: annotation.y
           }
-        }
+        );
 
-        const t = (lo + hi) / 2;
-
-        return {
-          x: a.x + (b.x - a.x) * t,
-          y: a.y + (b.y - a.y) * t,
-          pressure:
-            (a.pressure ?? 0.5) +
-            (
-              (b.pressure ?? 0.5) -
-              (a.pressure ?? 0.5)
-            ) * t
-        };
-      };
-
-      for (let i = 0; i < points.length - 1; i++) {
-        const a = points[i];
-        const b = points[i + 1];
-
-        const aInside =
-          isPointInside(a);
-
-        const bInside =
-          isPointInside(b);
-
-        const segmentHit =
-          segmentHitsEraser(a, b);
-
-        /*
-         * Completely untouched segment.
-         */
-        if (
-          !aInside &&
-          !bInside &&
-          !segmentHit
-        ) {
-          if (currentRun.length === 0) {
-            pushPoint(a);
-          }
-
-          pushPoint(b);
-          continue;
-        }
-
-        /*
-         * Segment enters eraser.
-         * Keep the portion before the eraser.
-         */
-        if (
-          !aInside &&
-          segmentHit
-        ) {
-          const boundary =
-            findBoundaryPoint(
-              a,
-              b,
-              false,
-              true
-            );
-
-          pushPoint(a);
-          pushPoint(boundary);
-
-          if (currentRun.length > 0) {
-            runs.push(currentRun);
-          }
-
-          currentRun = [];
-          continue;
-        }
-
-        /*
-         * Segment exits eraser.
-         * Start a new surviving portion.
-         */
-        if (
-          aInside &&
-          !bInside &&
-          segmentHit
-        ) {
-          const boundary =
-            findBoundaryPoint(
-              a,
-              b,
-              true,
-              false
-            );
-
-          currentRun = [];
-          pushPoint(boundary);
-          pushPoint(b);
-          continue;
-        }
-
-        /*
-         * The entire segment is inside the eraser.
-         */
-        if (
-          aInside &&
-          bInside
-        ) {
-          if (currentRun.length > 0) {
-            runs.push(currentRun);
-            currentRun = [];
-          }
-
-          continue;
-        }
-
-        /*
-         * Fallback for unusual sparse strokes.
-         */
-        if (!aInside && !bInside) {
-          pushPoint(a);
-          pushPoint(b);
-        }
-      }
-
-      /*
-       * Handle the final point.
-       */
-      const lastPoint =
-        points[points.length - 1];
-
-      if (!isPointInside(lastPoint)) {
-        if (currentRun.length === 0) {
-          pushPoint(lastPoint);
+        if (textDistance <= radius + 20) {
+          deletedAnnotations.push(annotation);
         } else {
-          pushPoint(lastPoint);
+          updatedAnnotations.push(annotation);
         }
-      } else if (
-        currentRun.length > 0
-      ) {
-        runs.push(currentRun);
-        currentRun = [];
-      }
 
-      if (currentRun.length > 0) {
-        runs.push(currentRun);
-      }
-
-      /*
-       * Remove tiny fragments.
-       */
-      const validRuns = runs.filter(
-        run => run.length >= 2
-      );
-
-      /*
-       * Nothing was actually erased.
-       */
-      if (
-        validRuns.length === 1 &&
-        validRuns[0].length === points.length
-      ) {
-        updatedAnnotations.push(ann);
         continue;
       }
 
-      /*
-       * If the original stroke was touched,
-       * its surviving portions become separate
-       * vector strokes.
+      /**
+       * Only pen/highlighter strokes can be
+       * partially erased.
        */
       if (
-        validRuns.length === 0
+        annotation.type !== 'pen' &&
+        annotation.type !== 'highlighter'
       ) {
-        changedAnnotations.push(ann);
+        updatedAnnotations.push(annotation);
         continue;
       }
 
-      changedAnnotations.push(ann);
+      /**
+       * Make the eraser slightly larger for
+       * thick strokes.
+       */
+      const effectiveRadius =
+        radius +
+        (annotation.width || 3) / 2;
 
-      validRuns.forEach(
-        (run, index) => {
-          updatedAnnotations.push({
-            ...ann,
-            id:
-              `${ann.id}_part_${Date.now()}_${index}_${Math.random()
-                .toString(36)
-                .slice(2, 6)}`,
-            points: run
-          });
-        }
+      const runs = cutStroke(
+        annotation.points || [],
+        eraserPoint,
+        effectiveRadius
       );
+
+      /**
+       * Completely untouched.
+       */
+      if (runs === null) {
+        updatedAnnotations.push(annotation);
+        continue;
+      }
+
+      /**
+       * Original annotation was affected.
+       */
+      deletedAnnotations.push(annotation);
+
+      /**
+       * Add surviving pieces as separate
+       * annotations.
+       */
+      for (const run of runs) {
+        if (
+          !run ||
+          run.length < 2 ||
+          runLength(run) < 1.5
+        ) {
+          continue;
+        }
+
+        partCounter += 1;
+
+        updatedAnnotations.push({
+          ...annotation,
+
+          id:
+            `${annotation.id}_part_${partCounter}`,
+
+          /**
+           * A recognised shape is no longer
+           * considered a complete editable shape.
+           */
+          shapeRecognized:
+            annotation.shapeRecognized
+              ? 'partial'
+              : undefined,
+
+          /**
+           * Remove editable geometry information
+           * because the shape has been modified.
+           */
+          shape: undefined,
+
+          smartConfidence: undefined,
+
+          /**
+           * Keep the surviving points.
+           */
+          points: run
+        });
+      }
     }
 
     return {
       updatedAnnotations,
-      deletedAnnotations:
-        changedAnnotations,
+      deletedAnnotations,
+
       changed:
-        changedAnnotations.length > 0
+        deletedAnnotations.length > 0
     };
   }
 
+  /**
+   * Draw the eraser cursor.
+   *
+   * IMPORTANT:
+   * This expects coordinates in the same document
+   * coordinate system as the annotation canvas.
+   */
   static drawCursor(
     ctx,
     point,
     radius = 16
   ) {
-    if (!point) return;
+    if (!ctx || !point) {
+      return;
+    }
 
     ctx.save();
 
+    /**
+     * Outer translucent eraser area.
+     */
     ctx.beginPath();
+
     ctx.arc(
       point.x,
       point.y,
@@ -334,13 +456,31 @@ export class EraserTool {
 
     ctx.fill();
 
+    /**
+     * Outer border.
+     */
+    ctx.beginPath();
+
+    ctx.arc(
+      point.x,
+      point.y,
+      radius,
+      0,
+      Math.PI * 2
+    );
+
     ctx.strokeStyle =
       'rgba(239, 68, 68, 0.9)';
 
     ctx.lineWidth = 1.5;
+
     ctx.stroke();
 
+    /**
+     * Center dot.
+     */
     ctx.beginPath();
+
     ctx.arc(
       point.x,
       point.y,

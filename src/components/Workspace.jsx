@@ -290,13 +290,31 @@ export default function Workspace() {
    * -------------------------------------------------------
    */
 
-  let gridClass = '';
+  /*
+   * The paper pattern is chosen explicitly. "none" is the ONLY option that
+   * gives a blank page. The pattern scales with zoom so it stays locked to the
+   * page (and to everything drawn on it) while zooming.
+   */
+  let gridClass = 'grid-none';
+  let gridBackgroundSize;
+
   if (gridType === 'millimeter') {
+    const minor = 20 * safeZoom;
+    const major = 100 * safeZoom;
+
     gridClass = 'grid-millimeter';
+    gridBackgroundSize =
+      `${minor}px ${minor}px, ${minor}px ${minor}px, ` +
+      `${major}px ${major}px, ${major}px ${major}px`;
   } else if (gridType === 'cartesian') {
+    const cell = 40 * safeZoom;
+
     gridClass = 'grid-cartesian';
+    gridBackgroundSize = `${cell}px ${cell}px`;
   } else if (gridType === 'isometric') {
     gridClass = 'grid-isometric';
+    gridBackgroundSize =
+      `${40 * safeZoom}px ${69.28 * safeZoom}px`;
   }
 
   const getToolCursor = () => {
@@ -492,7 +510,13 @@ export default function Workspace() {
                   width: renderedWidth,
                   height: renderedHeight,
                   boxSizing: 'border-box',
-                  background: 'var(--paper-bg)',
+                  /*
+                   * IMPORTANT: use backgroundColor, NOT the `background`
+                   * shorthand. The shorthand resets background-image and
+                   * background-size, which wiped out the grid classes.
+                   */
+                  backgroundColor: 'var(--paper-bg)',
+                  backgroundSize: gridBackgroundSize,
                   boxShadow: 'var(--paper-shadow)',
                   borderRadius: '3px'
                 }}
